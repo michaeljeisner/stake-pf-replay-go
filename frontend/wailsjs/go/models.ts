@@ -1126,6 +1126,9 @@ export namespace stakeauth {
 	    label: string;
 	    mirror: string;
 	    currency: string;
+	    profileId: string;
+	    connectionState: string;
+	    lastCheckAt?: string;
 	    createdAt: string;
 	    updatedAt: string;
 	
@@ -1139,6 +1142,9 @@ export namespace stakeauth {
 	        this.label = source["label"];
 	        this.mirror = source["mirror"];
 	        this.currency = source["currency"];
+	        this.profileId = source["profileId"];
+	        this.connectionState = source["connectionState"];
+	        this.lastCheckAt = source["lastCheckAt"];
 	        this.createdAt = source["createdAt"];
 	        this.updatedAt = source["updatedAt"];
 	    }
@@ -1159,8 +1165,25 @@ export namespace stakeauth {
 	        this.vault = source["vault"];
 	    }
 	}
+	export class StateReason {
+	    code?: string;
+	    message?: string;
+	
+	    static createFrom(source: any = {}) {
+	        return new StateReason(source);
+	    }
+	
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.code = source["code"];
+	        this.message = source["message"];
+	    }
+	}
 	export class ActiveStatus {
 	    connected: boolean;
+	    state: string;
+	    reason?: StateReason;
+	    lastCheckAt?: string;
 	    accountId?: string;
 	    account?: Account;
 	    error?: string;
@@ -1173,6 +1196,9 @@ export namespace stakeauth {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.connected = source["connected"];
+	        this.state = source["state"];
+	        this.reason = this.convertValues(source["reason"], StateReason);
+	        this.lastCheckAt = source["lastCheckAt"];
 	        this.accountId = source["accountId"];
 	        this.account = this.convertValues(source["account"], Account);
 	        this.error = source["error"];
@@ -1215,6 +1241,9 @@ export namespace stakeauth {
 	}
 	export class ConnectionCheckResult {
 	    ok: boolean;
+	    state: string;
+	    reason?: StateReason;
+	    lastCheckAt?: string;
 	    steps: ConnectionStep[];
 	
 	    static createFrom(source: any = {}) {
@@ -1224,6 +1253,9 @@ export namespace stakeauth {
 	    constructor(source: any = {}) {
 	        if ('string' === typeof source) source = JSON.parse(source);
 	        this.ok = source["ok"];
+	        this.state = source["state"];
+	        this.reason = this.convertValues(source["reason"], StateReason);
+	        this.lastCheckAt = source["lastCheckAt"];
 	        this.steps = this.convertValues(source["steps"], ConnectionStep);
 	    }
 	
@@ -1262,6 +1294,7 @@ export namespace stakeauth {
 	        this.hasUserAgent = source["hasUserAgent"];
 	    }
 	}
+	
 
 }
 

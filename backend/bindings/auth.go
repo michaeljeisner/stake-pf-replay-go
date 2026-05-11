@@ -84,6 +84,10 @@ func (m *AuthModule) OpenCasinoInBrowser(id string) error {
 	return m.inner.OpenCasinoInBrowser(id)
 }
 
+func (m *AuthModule) RepairSession(id string) error {
+	return m.inner.RepairSession(id)
+}
+
 // SessionProvider methods used by ScriptModule.
 func (m *AuthModule) Client() *stake.Client {
 	return m.inner.Client()
@@ -91,6 +95,10 @@ func (m *AuthModule) Client() *stake.Client {
 
 func (m *AuthModule) IsConnected() bool {
 	return m.inner.IsConnected()
+}
+
+func (m *AuthModule) ActiveConnectionState() string {
+	return m.inner.ActiveConnectionState()
 }
 
 // DefaultFallbackSecretsPath builds a fallback secret file path.

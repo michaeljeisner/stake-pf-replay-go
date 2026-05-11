@@ -20,23 +20,38 @@ type Account = {
   label: string;
   mirror: string;
   currency: string;
+  profileId: string;
+  connectionState: string;
+  lastCheckAt?: string;
   createdAt: string;
   updatedAt: string;
 };
 
 type ActiveStatus = {
   connected: boolean;
+  state: string;
+  reason?: { code?: string; message?: string };
+  lastCheckAt?: string;
   accountId?: string;
   error?: string;
   balances?: { currency: string; available: number; vault: number }[];
 };
 
 type StepResult = { name: string; success: boolean; message?: string };
-type ConnectionCheckResult = { ok: boolean; steps: StepResult[] };
+type ConnectionCheckResult = { ok: boolean; state: string; reason?: { code?: string; message?: string }; lastCheckAt?: string; steps: StepResult[] };
 type SecretsMasked = { hasApiKey: boolean; hasClearance: boolean; hasUserAgent: boolean };
 
 const DOMAIN_OPTIONS = ['stake.com', 'stake.us', 'stake.bet'];
 const CURRENCY_OPTIONS = ['btc', 'eth', 'ltc', 'trx', 'usdc', 'doge', 'xrp'];
+const STATE_LABELS: Record<string, string> = {
+  not_configured: 'Not Configured',
+  needs_login: 'Needs Login',
+  checking: 'Checking',
+  connected: 'Connected',
+  needs_browser_repair: 'Repair Session',
+  credential_failed: 'Credential Failed',
+  disconnected: 'Disconnected',
+};
 
 function authModule(): any {
   return (window as any)?.go?.bindings?.AuthModule;
@@ -49,7 +64,7 @@ export function AccountsPage() {
   const [saving, setSaving] = useState(false);
   const [connecting, setConnecting] = useState(false);
   const [checking, setChecking] = useState(false);
-  const [activeStatus, setActiveStatus] = useState<ActiveStatus>({ connected: false });
+  const [activeStatus, setActiveStatus] = useState<ActiveStatus>({ connected: false, state: 'disconnected' });
   const [checkResult, setCheckResult] = useState<ConnectionCheckResult | null>(null);
   const [masked, setMasked] = useState<SecretsMasked>({ hasApiKey: false, hasClearance: false, hasUserAgent: false });
 
@@ -70,7 +85,7 @@ export function AccountsPage() {
     }
     const [list, status] = await Promise.all([mod.ListAccounts(), mod.GetActiveStatus()]);
     setAccounts((list ?? []) as Account[]);
-    setActiveStatus((status ?? { connected: false }) as ActiveStatus);
+    setActiveStatus((status ?? { connected: false, state: 'disconnected' }) as ActiveStatus);
     if (!selectedID && Array.isArray(list) && list.length > 0) {
       setSelectedID(list[0].id);
     }
@@ -218,16 +233,27 @@ export function AccountsPage() {
     toast.success('Disconnected');
   }, []);
 
-  const handleOpenCasino = useCallback(async () => {
+  const handleRepairSession = useCallback(async () => {
     if (!selected) return;
     const mod = authModule();
     if (!mod) return;
     try {
-      await mod.OpenCasinoInBrowser(selected.id);
+      if (typeof mod.RepairSession === 'function') {
+        await mod.RepairSession(selected.id);
+      } else {
+        await mod.OpenCasinoInBrowser(selected.id);
+      }
+      const status = await mod.GetActiveStatus();
+      setActiveStatus(status as ActiveStatus);
     } catch (err: any) {
-      toast.error(err?.message ?? 'Failed to open browser');
+      toast.error(err?.message ?? 'Failed to open session repair');
     }
   }, [selected]);
+
+  const selectedState = activeStatus.accountId === selected?.id
+    ? activeStatus.state
+    : selected?.connectionState ?? 'disconnected';
+  const selectedStateLabel = STATE_LABELS[selectedState] ?? selectedState;
 
   return (
     <div className="grid grid-cols-1 gap-6 xl:grid-cols-[300px,1fr]">
@@ -283,10 +309,10 @@ export function AccountsPage() {
                 <h1 className="font-display text-sm uppercase tracking-widest">Account Settings</h1>
               </div>
               <div className="flex items-center gap-2">
-                {activeStatus.connected && activeStatus.accountId === selected.id ? (
+                {activeStatus.connected && activeStatus.accountId === selected.id && activeStatus.state === 'connected' ? (
                   <span className="badge-terminal text-emerald-300">Connected</span>
                 ) : (
-                  <span className="badge-terminal text-muted-foreground">Disconnected</span>
+                  <span className="badge-terminal text-muted-foreground">{selectedStateLabel}</span>
                 )}
               </div>
             </div>
@@ -336,7 +362,7 @@ export function AccountsPage() {
                   onChange={(e) => setApiKey(e.target.value)}
                 />
                 <details className="group rounded border border-border/60 bg-background/50 p-3">
-                  <summary className="cursor-pointer font-mono text-xs uppercase tracking-wider text-muted-foreground">Advanced Cloudflare</summary>
+                  <summary className="cursor-pointer font-mono text-xs uppercase tracking-wider text-muted-foreground">Session Repair</summary>
                   <div className="mt-3 space-y-3">
                     <input
                       className="h-9 w-full border border-border bg-background px-2 text-sm"
@@ -350,12 +376,12 @@ export function AccountsPage() {
                       value={userAgent}
                       onChange={(e) => setUserAgent(e.target.value)}
                     />
-                    <Button size="sm" variant="outline" className="gap-2" onClick={handleOpenCasino}>
+                    <Button size="sm" variant="outline" className="gap-2" onClick={handleRepairSession}>
                       <IconExternalLink size={14} />
-                      Open Casino in Browser
+                      Repair Session
                     </Button>
                     <p className="text-xs text-muted-foreground">
-                      If Cloudflare checks fail, open the site and solve the challenge, then copy `cf_clearance` from browser DevTools.
+                      If the browser session check fails, open the casino site, complete login or checks normally, then test the connection again. Manual cookie fields are a fallback.
                     </p>
                   </div>
                 </details>
@@ -375,7 +401,7 @@ export function AccountsPage() {
               <div className="space-y-2">
                 {(checkResult?.steps ?? [
                   { name: 'mirror', success: false, message: 'Not checked yet' },
-                  { name: 'cloudflare', success: false, message: 'Not checked yet' },
+                  { name: 'browser_session', success: false, message: 'Not checked yet' },
                   { name: 'credentials', success: false, message: 'Not checked yet' },
                 ]).map((step) => (
                   <div key={step.name} className="flex items-center gap-2 border border-border/50 bg-background/40 p-2 text-xs">
@@ -406,6 +432,12 @@ export function AccountsPage() {
 
             {activeStatus.error ? (
               <div className="rounded border border-red-500/40 bg-red-500/10 p-3 text-xs text-red-300">{activeStatus.error}</div>
+            ) : null}
+
+            {activeStatus.reason?.message && activeStatus.accountId === selected.id ? (
+              <div className="rounded border border-border/60 bg-muted/10 p-3 text-xs text-muted-foreground">
+                {activeStatus.reason.message}
+              </div>
             ) : null}
 
             {activeStatus.connected && activeStatus.accountId === selected.id && activeStatus.balances?.length ? (

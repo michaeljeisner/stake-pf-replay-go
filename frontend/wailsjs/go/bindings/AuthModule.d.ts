@@ -4,6 +4,8 @@ import {stake} from '../models';
 import {stakeauth} from '../models';
 import {context} from '../models';
 
+export function ActiveConnectionState():Promise<string>;
+
 export function Client():Promise<stake.Client>;
 
 export function Connect(arg1:string):Promise<void>;
@@ -23,6 +25,8 @@ export function IsConnected():Promise<boolean>;
 export function ListAccounts():Promise<Array<stakeauth.Account>>;
 
 export function OpenCasinoInBrowser(arg1:string):Promise<void>;
+
+export function RepairSession(arg1:string):Promise<void>;
 
 export function SaveAccount(arg1:stakeauth.Account):Promise<stakeauth.Account>;
 

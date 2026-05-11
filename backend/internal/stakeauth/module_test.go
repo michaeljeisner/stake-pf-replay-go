@@ -84,6 +84,9 @@ func TestModuleConnectionCheckAndConnect(t *testing.T) {
 	if !check.OK {
 		t.Fatalf("expected check OK, got %#v", check)
 	}
+	if got := check.State; got != StateConnected {
+		t.Fatalf("expected check state %q, got %q", StateConnected, got)
+	}
 
 	if err := mod.Connect(acct.ID); err != nil {
 		t.Fatalf("connect: %v", err)
@@ -91,6 +94,9 @@ func TestModuleConnectionCheckAndConnect(t *testing.T) {
 	status := mod.GetActiveStatus()
 	if !status.Connected {
 		t.Fatalf("expected connected status, got %#v", status)
+	}
+	if status.State != StateConnected {
+		t.Fatalf("expected active state %q, got %q", StateConnected, status.State)
 	}
 	if mod.Client() == nil || !mod.IsConnected() {
 		t.Fatal("expected active client")
@@ -135,5 +141,56 @@ func TestModuleConnectionCheckCloudflareFail(t *testing.T) {
 	}
 	if len(check.Steps) < 2 || check.Steps[1].Success {
 		t.Fatalf("expected cloudflare step failure, got %#v", check.Steps)
+	}
+	if check.Steps[1].Name != "browser_session" {
+		t.Fatalf("expected browser_session step, got %#v", check.Steps[1])
+	}
+	if check.State != StateNeedsBrowserRepair {
+		t.Fatalf("expected state %q, got %q", StateNeedsBrowserRepair, check.State)
+	}
+	status := mod.GetActiveStatus()
+	if status.State != StateNeedsBrowserRepair {
+		t.Fatalf("expected active status state %q, got %#v", StateNeedsBrowserRepair, status)
+	}
+}
+
+func TestModuleConnectionCheckCredentialFail(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/":
+			w.WriteHeader(200)
+			return
+		case "/_api/graphql":
+			if r.Header.Get("x-access-token") != "" {
+				w.WriteHeader(401)
+				_, _ = w.Write([]byte("unauthorized"))
+				return
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{"data": map[string]any{"__typename": "Query"}})
+			return
+		default:
+			w.WriteHeader(404)
+		}
+	}))
+	defer server.Close()
+
+	mod := testModule(t)
+	acct, err := mod.SaveAccount(Account{Label: "Bad key", Mirror: server.URL, Currency: "btc"})
+	if err != nil {
+		t.Fatalf("save account: %v", err)
+	}
+	if err := mod.SetSecrets(acct.ID, "bad-api-key", "", ""); err != nil {
+		t.Fatalf("set secrets: %v", err)
+	}
+
+	check, err := mod.ConnectionCheck(acct.ID)
+	if err != nil {
+		t.Fatalf("connection check err: %v", err)
+	}
+	if check.OK {
+		t.Fatalf("expected failed check, got %#v", check)
+	}
+	if check.State != StateCredentialFailed {
+		t.Fatalf("expected state %q, got %q", StateCredentialFailed, check.State)
 	}
 }

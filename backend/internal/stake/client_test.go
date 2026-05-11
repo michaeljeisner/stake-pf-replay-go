@@ -104,13 +104,41 @@ func TestGetBalances(t *testing.T) {
 	}
 }
 
-func TestRetryOnHTTP403(t *testing.T) {
+func TestHTTP403IsNotRetried(t *testing.T) {
+	attempts := 0
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		attempts++
+		w.WriteHeader(403)
+		w.Write([]byte("forbidden"))
+	}))
+	defer server.Close()
+
+	c := NewClient(Config{
+		Domain:         server.Listener.Addr().String(),
+		SessionToken:   "test-token",
+		HTTPClient:     server.Client(),
+		MaxRetries:     3,
+		BaseRetryDelay: 10 * time.Millisecond,
+		MaxRetryDelay:  50 * time.Millisecond,
+	})
+
+	ctx := context.Background()
+	_, err := c.GetBalances(ctx)
+	if err == nil {
+		t.Fatal("expected HTTP 403 error")
+	}
+	if attempts != 1 {
+		t.Errorf("expected 1 attempt, got %d", attempts)
+	}
+}
+
+func TestRetryOnHTTP500(t *testing.T) {
 	attempts := 0
 	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		attempts++
 		if attempts <= 2 {
-			w.WriteHeader(403)
-			w.Write([]byte("rate limited"))
+			w.WriteHeader(500)
+			w.Write([]byte("server error"))
 			return
 		}
 		json.NewEncoder(w).Encode(map[string]any{

@@ -62,6 +62,10 @@ type Config struct {
 	// Defaults to a client with 30s timeout.
 	HTTPClient *http.Client
 
+	// Transport executes prepared HTTP requests. It exists so a future
+	// browser-profile-backed transport can share the same Stake client surface.
+	Transport RequestTransport
+
 	// UserAgent overrides the User-Agent header. Optional.
 	UserAgent string
 
@@ -70,11 +74,17 @@ type Config struct {
 	Clearance string
 }
 
+// RequestTransport is the narrow request execution surface used by Client.
+type RequestTransport interface {
+	Do(req *http.Request) (*http.Response, error)
+}
+
 // Client is a Stake.com API client.
 type Client struct {
-	config Config
-	http   *http.Client
-	mu     sync.RWMutex
+	config    Config
+	http      *http.Client
+	transport RequestTransport
+	mu        sync.RWMutex
 }
 
 // NewClient creates a new Stake API client with the given configuration.
@@ -98,8 +108,9 @@ func NewClient(cfg Config) *Client {
 	}
 
 	return &Client{
-		config: cfg,
-		http:   httpClient,
+		config:    cfg,
+		http:      httpClient,
+		transport: firstTransport(cfg.Transport, httpClient),
 	}
 }
 
@@ -164,9 +175,9 @@ func (c *Client) doRequest(ctx context.Context, path string, body any) (*Respons
 		req.Header.Set("Cookie", fmt.Sprintf("cf_clearance=%s", c.config.Clearance))
 	}
 
-	resp, err := c.http.Do(req)
+	resp, err := c.transport.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("stake: http request: %w", err)
+		return nil, &TransportError{Err: err}
 	}
 	defer resp.Body.Close()
 
@@ -239,12 +250,15 @@ func (c *Client) doRequestWithRetry(ctx context.Context, path string, body any) 
 		if err != nil {
 			lastErr = err
 
-			// Check if the HTTP error is retryable
+			// Check if the HTTP or transport error is retryable.
 			if httpErr, ok := err.(*HTTPError); ok && httpErr.IsRetryable() {
 				continue
 			}
+			if transportErr, ok := err.(*TransportError); ok && transportErr.IsRetryable() {
+				continue
+			}
 
-			// Auth errors and other non-retryable errors fail immediately
+			// Auth, Cloudflare, and other non-retryable errors fail immediately.
 			return nil, err
 		}
 
@@ -269,6 +283,13 @@ func (c *Client) doRequestWithRetry(ctx context.Context, path string, body any) 
 		return nil, fmt.Errorf("stake: max retries exceeded: %w", lastErr)
 	}
 	return nil, fmt.Errorf("stake: max retries exceeded")
+}
+
+func firstTransport(primary RequestTransport, fallback *http.Client) RequestTransport {
+	if primary != nil {
+		return primary
+	}
+	return fallback
 }
 
 // retryDelay calculates the backoff delay for a given attempt number.

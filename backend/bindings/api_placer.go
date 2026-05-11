@@ -2,7 +2,9 @@ package bindings
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/MJE43/stake-pf-replay-go/internal/scripting"
 	"github.com/MJE43/stake-pf-replay-go/internal/stake"
@@ -12,8 +14,9 @@ import (
 // It maps script variables to API requests and API responses back to BetResults.
 // Includes a circuit breaker that halts betting after repeated API failures.
 type ApiBetPlacer struct {
-	client         *stake.Client
-	consecutiveFails int
+	client              *stake.Client
+	mu                  sync.Mutex
+	consecutiveFails    int
 	maxConsecutiveFails int
 }
 
@@ -31,6 +34,9 @@ func NewApiBetPlacer(client *stake.Client) *ApiBetPlacer {
 // the current game variable. Returns a scripting.BetResult.
 // Includes circuit breaker: halts after maxConsecutiveFails successive errors.
 func (p *ApiBetPlacer) PlaceBet(ctx context.Context, vars *scripting.Variables) (*scripting.BetResult, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	// Circuit breaker check
 	if p.consecutiveFails >= p.maxConsecutiveFails {
 		return nil, fmt.Errorf("circuit breaker open: %d consecutive API failures — stopping for safety", p.consecutiveFails)
@@ -43,24 +49,8 @@ func (p *ApiBetPlacer) PlaceBet(ctx context.Context, vars *scripting.Variables) 
 		result, err = p.placeDiceBet(ctx, vars)
 	case "limbo":
 		result, err = p.placeLimboBet(ctx, vars)
-	case "keno":
-		result, err = p.placeKenoBet(ctx, vars)
-	case "baccarat":
-		result, err = p.placeBaccaratBet(ctx, vars)
-	case "plinko":
-		result, err = p.placePlinkoBet(ctx, vars)
-	case "wheel":
-		result, err = p.placeWheelBet(ctx, vars)
-	case "roulette":
-		result, err = p.placeRouletteBet(ctx, vars)
-	case "hilo":
-		result, err = p.placeHiloBet(ctx, vars)
-	case "mines":
-		result, err = p.placeMinesBet(ctx, vars)
-	case "blackjack":
-		result, err = p.placeBlackjackBet(ctx, vars)
 	default:
-		return nil, fmt.Errorf("unsupported game for live betting: %q", vars.Game)
+		return nil, fmt.Errorf("unsupported live game %q; live mode currently supports dice and limbo", vars.Game)
 	}
 
 	// Circuit breaker tracking
@@ -74,12 +64,14 @@ func (p *ApiBetPlacer) PlaceBet(ctx context.Context, vars *scripting.Variables) 
 
 func (p *ApiBetPlacer) placeDiceBet(ctx context.Context, vars *scripting.Variables) (*scripting.BetResult, error) {
 	condition := "above"
+	target := 100 - vars.Chance
 	if !vars.BetHigh {
 		condition = "below"
+		target = vars.Chance
 	}
 
 	result, err := p.client.DiceBet(ctx, stake.DiceBetRequest{
-		Target:    vars.Chance,
+		Target:    target,
 		Condition: condition,
 		Amount:    vars.NextBet,
 	})
@@ -530,6 +522,16 @@ func (p *ApiBetPlacer) GetBalance(ctx context.Context, currency string) (float64
 func classifyError(err error) error {
 	if err == nil {
 		return nil
+	}
+
+	var authErr *stake.AuthError
+	if errors.As(err, &authErr) {
+		return fmt.Errorf("authentication failed (HTTP %d): %s - update credentials or reconnect the account", authErr.StatusCode, authErr.Message)
+	}
+
+	var cfErr *stake.CloudflareError
+	if errors.As(err, &cfErr) {
+		return fmt.Errorf("browser session repair required (HTTP %d): %s", cfErr.StatusCode, cfErr.Message)
 	}
 
 	// Check for auth errors

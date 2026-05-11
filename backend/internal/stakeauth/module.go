@@ -4,14 +4,15 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/MJE43/stake-pf-replay-go/internal/stake"
-	"github.com/zalando/go-keyring"
 	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/zalando/go-keyring"
 )
 
 // SecretsMasked returns only availability flags to avoid exposing secrets in UI/API.
@@ -30,8 +31,11 @@ type ConnectionStep struct {
 
 // ConnectionCheckResult contains outcomes for all connection check steps.
 type ConnectionCheckResult struct {
-	OK    bool             `json:"ok"`
-	Steps []ConnectionStep `json:"steps"`
+	OK          bool             `json:"ok"`
+	State       string           `json:"state"`
+	Reason      StateReason      `json:"reason,omitempty"`
+	LastCheckAt string           `json:"lastCheckAt,omitempty"`
+	Steps       []ConnectionStep `json:"steps"`
 }
 
 // SessionBalance is a simplified balance entry for frontend rendering.
@@ -43,11 +47,14 @@ type SessionBalance struct {
 
 // ActiveStatus is the frontend-facing connected session state.
 type ActiveStatus struct {
-	Connected bool             `json:"connected"`
-	AccountID string           `json:"accountId,omitempty"`
-	Account   *Account         `json:"account,omitempty"`
-	Error     string           `json:"error,omitempty"`
-	Balances  []SessionBalance `json:"balances,omitempty"`
+	Connected   bool             `json:"connected"`
+	State       string           `json:"state"`
+	Reason      StateReason      `json:"reason,omitempty"`
+	LastCheckAt string           `json:"lastCheckAt,omitempty"`
+	AccountID   string           `json:"accountId,omitempty"`
+	Account     *Account         `json:"account,omitempty"`
+	Error       string           `json:"error,omitempty"`
+	Balances    []SessionBalance `json:"balances,omitempty"`
 }
 
 // Module provides Wails-bound auth/account/session functionality.
@@ -69,6 +76,7 @@ func NewModule(store *Store, keyringStore *KeyringStore) *Module {
 		keyring: keyringStore,
 		activeState: ActiveStatus{
 			Connected: false,
+			State:     StateDisconnected,
 		},
 	}
 }
@@ -110,7 +118,7 @@ func (m *Module) DeleteAccount(id string) error {
 	if m.activeID == id {
 		m.active = nil
 		m.activeID = ""
-		m.activeState = ActiveStatus{Connected: false}
+		m.activeState = ActiveStatus{Connected: false, State: StateDisconnected}
 	}
 	return nil
 }
@@ -121,12 +129,12 @@ func (m *Module) SetSecrets(id, apiKey, clearance, userAgent string) error {
 		return fmt.Errorf("account id is required")
 	}
 	apiKey = strings.TrimSpace(apiKey)
-	if apiKey == "" {
+	if apiKey != "" {
+		if err := m.keyring.SetAPIKey(id, apiKey); err != nil {
+			return err
+		}
+	} else if _, err := m.keyring.GetAPIKey(id); err != nil {
 		return fmt.Errorf("api key is required")
-	}
-
-	if err := m.keyring.SetAPIKey(id, apiKey); err != nil {
-		return err
 	}
 	if err := m.keyring.SetClearance(id, strings.TrimSpace(clearance)); err != nil {
 		return err
@@ -171,16 +179,33 @@ func (m *Module) ConnectionCheck(id string) (ConnectionCheckResult, error) {
 	if err != nil {
 		return ConnectionCheckResult{}, err
 	}
+	checkedAt := time.Now().UTC()
+	m.setActiveState(ActiveStatus{
+		Connected: false,
+		State:     StateChecking,
+		AccountID: id,
+		Account:   acct,
+	})
 
 	apiKey, err := m.keyring.GetAPIKey(id)
 	if err != nil {
-		return ConnectionCheckResult{}, fmt.Errorf("missing api key: %w", err)
+		result := m.finishConnectionCheck(id, acct, checkedAt, ConnectionCheckResult{
+			OK:    false,
+			State: StateNotConfigured,
+			Reason: StateReason{
+				Code:    "missing_api_key",
+				Message: "Stake API key is required before connecting.",
+			},
+			Steps: []ConnectionStep{{Name: "credentials", Success: false, Message: "missing api key"}},
+		})
+		return result, nil
 	}
 	clearance, _ := m.keyring.GetClearance(id)
 	userAgent, _ := m.keyring.GetUserAgent(id)
 
 	result := ConnectionCheckResult{
 		OK:    false,
+		State: StateChecking,
 		Steps: []ConnectionStep{},
 	}
 
@@ -194,6 +219,9 @@ func (m *Module) ConnectionCheck(id string) (ConnectionCheckResult, error) {
 	step1 := ConnectionStep{Name: "mirror"}
 	req1, _ := http.NewRequestWithContext(m.context(), http.MethodHead, base+"/", nil)
 	resp1, err := httpClient.Do(req1)
+	if resp1 != nil {
+		defer resp1.Body.Close()
+	}
 	if err != nil || resp1 == nil || resp1.StatusCode >= 400 {
 		step1.Success = false
 		if err != nil {
@@ -202,13 +230,15 @@ func (m *Module) ConnectionCheck(id string) (ConnectionCheckResult, error) {
 			step1.Message = fmt.Sprintf("status %d", resp1.StatusCode)
 		}
 		result.Steps = append(result.Steps, step1)
-		return result, nil
+		result.State = StateNeedsLogin
+		result.Reason = StateReason{Code: "mirror_unreachable", Message: step1.Message}
+		return m.finishConnectionCheck(id, acct, checkedAt, result), nil
 	}
 	step1.Success = true
 	result.Steps = append(result.Steps, step1)
 
 	// 2) Cloudflare/session check
-	step2 := ConnectionStep{Name: "cloudflare"}
+	step2 := ConnectionStep{Name: "browser_session"}
 	req2, _ := http.NewRequestWithContext(
 		m.context(),
 		http.MethodPost,
@@ -223,7 +253,12 @@ func (m *Module) ConnectionCheck(id string) (ConnectionCheckResult, error) {
 		req2.Header.Set("User-Agent", strings.TrimSpace(userAgent))
 	}
 	resp2, err := httpClient.Do(req2)
-	if err != nil || resp2 == nil || resp2.StatusCode >= 500 {
+	var resp2Body []byte
+	if resp2 != nil {
+		resp2Body, _ = io.ReadAll(resp2.Body)
+		_ = resp2.Body.Close()
+	}
+	if err != nil || resp2 == nil || isCloudflareChallenge(resp2.StatusCode, resp2Body) || resp2.StatusCode >= 500 {
 		step2.Success = false
 		if err != nil {
 			step2.Message = err.Error()
@@ -231,7 +266,9 @@ func (m *Module) ConnectionCheck(id string) (ConnectionCheckResult, error) {
 			step2.Message = fmt.Sprintf("status %d", resp2.StatusCode)
 		}
 		result.Steps = append(result.Steps, step2)
-		return result, nil
+		result.State = StateNeedsBrowserRepair
+		result.Reason = StateReason{Code: "browser_session_failed", Message: step2.Message}
+		return m.finishConnectionCheck(id, acct, checkedAt, result), nil
 	}
 	step2.Success = true
 	result.Steps = append(result.Steps, step2)
@@ -250,18 +287,28 @@ func (m *Module) ConnectionCheck(id string) (ConnectionCheckResult, error) {
 		step3.Success = false
 		step3.Message = err.Error()
 		result.Steps = append(result.Steps, step3)
-		return result, nil
+		result.State, result.Reason = stateForStakeError(err)
+		return m.finishConnectionCheck(id, acct, checkedAt, result), nil
 	}
 	step3.Success = true
 	result.Steps = append(result.Steps, step3)
 	result.OK = true
-	return result, nil
+	result.State = StateConnected
+	result.Reason = StateReason{Code: "ok", Message: "Connected"}
+	return m.finishConnectionCheck(id, acct, checkedAt, result), nil
 }
 
 func (m *Module) Connect(id string) error {
 	id = strings.TrimSpace(id)
 	if id == "" {
 		return fmt.Errorf("account id is required")
+	}
+	check, err := m.ConnectionCheck(id)
+	if err != nil {
+		return err
+	}
+	if !check.OK {
+		return fmt.Errorf("connection check failed: %s", check.Reason.Message)
 	}
 	acct, err := m.store.Get(id)
 	if err != nil {
@@ -283,11 +330,14 @@ func (m *Module) Connect(id string) error {
 	})
 	balances, err := client.GetBalances(m.context())
 	if err != nil {
+		state, reason := stateForStakeError(err)
 		m.mu.Lock()
 		m.active = nil
 		m.activeID = ""
 		m.activeState = ActiveStatus{
 			Connected: false,
+			State:     state,
+			Reason:    reason,
 			Error:     err.Error(),
 		}
 		m.mu.Unlock()
@@ -309,10 +359,13 @@ func (m *Module) Connect(id string) error {
 	m.active = client
 	m.activeID = id
 	m.activeState = ActiveStatus{
-		Connected: true,
-		AccountID: id,
-		Account:   acct,
-		Balances:  viewBalances,
+		Connected:   true,
+		State:       StateConnected,
+		Reason:      StateReason{Code: "ok", Message: "Connected"},
+		LastCheckAt: acct.LastCheckAt,
+		AccountID:   id,
+		Account:     acct,
+		Balances:    viewBalances,
 	}
 	m.mu.Unlock()
 
@@ -324,7 +377,7 @@ func (m *Module) Disconnect() {
 	defer m.mu.Unlock()
 	m.active = nil
 	m.activeID = ""
-	m.activeState = ActiveStatus{Connected: false}
+	m.activeState = ActiveStatus{Connected: false, State: StateDisconnected}
 }
 
 func (m *Module) GetActiveStatus() ActiveStatus {
@@ -343,7 +396,16 @@ func (m *Module) Client() *stake.Client {
 func (m *Module) IsConnected() bool {
 	m.mu.RLock()
 	defer m.mu.RUnlock()
-	return m.active != nil && m.activeState.Connected
+	return m.active != nil && m.activeState.Connected && m.activeState.State == StateConnected
+}
+
+func (m *Module) ActiveConnectionState() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	if strings.TrimSpace(m.activeState.State) == "" {
+		return StateDisconnected
+	}
+	return m.activeState.State
 }
 
 func (m *Module) OpenCasinoInBrowser(id string) error {
@@ -360,4 +422,81 @@ func (m *Module) OpenCasinoInBrowser(id string) error {
 	}
 	wruntime.BrowserOpenURL(m.ctx, url)
 	return nil
+}
+
+func (m *Module) RepairSession(id string) error {
+	if err := m.OpenCasinoInBrowser(id); err != nil {
+		return err
+	}
+	acct, err := m.store.Get(strings.TrimSpace(id))
+	if err != nil {
+		return err
+	}
+	now := time.Now().UTC()
+	_ = m.store.UpdateConnectionState(acct.ID, StateNeedsBrowserRepair, now)
+	acct.ConnectionState = StateNeedsBrowserRepair
+	acct.LastCheckAt = now.Format(time.RFC3339)
+	m.setActiveState(ActiveStatus{
+		Connected:   false,
+		State:       StateNeedsBrowserRepair,
+		Reason:      StateReason{Code: "repair_opened", Message: "Complete login or Cloudflare checks in the browser, then test the connection again."},
+		LastCheckAt: acct.LastCheckAt,
+		AccountID:   acct.ID,
+		Account:     acct,
+	})
+	return nil
+}
+
+func (m *Module) finishConnectionCheck(id string, acct *Account, checkedAt time.Time, result ConnectionCheckResult) ConnectionCheckResult {
+	if result.State == "" {
+		result.State = StateDisconnected
+	}
+	result.LastCheckAt = checkedAt.Format(time.RFC3339)
+	_ = m.store.UpdateConnectionState(id, result.State, checkedAt)
+	if acct != nil {
+		acct.ConnectionState = result.State
+		acct.LastCheckAt = result.LastCheckAt
+	}
+	m.setActiveState(ActiveStatus{
+		Connected:   result.OK,
+		State:       result.State,
+		Reason:      result.Reason,
+		LastCheckAt: result.LastCheckAt,
+		AccountID:   id,
+		Account:     acct,
+		Error:       result.Reason.Message,
+	})
+	return result
+}
+
+func (m *Module) setActiveState(status ActiveStatus) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.activeState = status
+	if !status.Connected {
+		m.active = nil
+		m.activeID = ""
+	}
+}
+
+func isCloudflareChallenge(status int, body []byte) bool {
+	if status != http.StatusForbidden && status != http.StatusServiceUnavailable {
+		return false
+	}
+	trimmed := strings.TrimSpace(string(body))
+	return strings.HasPrefix(trimmed, "<!DOCTYPE html") ||
+		strings.HasPrefix(trimmed, "<html") ||
+		strings.HasPrefix(trimmed, "<")
+}
+
+func stateForStakeError(err error) (string, StateReason) {
+	var authErr *stake.AuthError
+	if errors.As(err, &authErr) {
+		return StateCredentialFailed, StateReason{Code: "credential_failed", Message: authErr.Error()}
+	}
+	var cfErr *stake.CloudflareError
+	if errors.As(err, &cfErr) {
+		return StateNeedsBrowserRepair, StateReason{Code: "browser_session_failed", Message: cfErr.Error()}
+	}
+	return StateNeedsLogin, StateReason{Code: "connection_failed", Message: err.Error()}
 }

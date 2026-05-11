@@ -7,9 +7,9 @@ import (
 	"strings"
 	"sync"
 
-	"github.com/MJE43/stake-pf-replay-go/internal/stake"
 	"github.com/MJE43/stake-pf-replay-go/internal/scripting"
 	"github.com/MJE43/stake-pf-replay-go/internal/scriptstore"
+	"github.com/MJE43/stake-pf-replay-go/internal/stake"
 )
 
 // ScriptModule is the Wails-bound struct for scripting engine management.
@@ -56,6 +56,7 @@ type wailsScriptEmitter struct {
 type SessionProvider interface {
 	Client() *stake.Client
 	IsConnected() bool
+	ActiveConnectionState() string
 }
 
 func (e *wailsScriptEmitter) EmitScriptState(state scripting.EngineSnapshot) {
@@ -119,6 +120,7 @@ func (sm *ScriptModule) StartScript(script string, game string, currency string,
 	if strings.TrimSpace(game) == "" {
 		game = "dice"
 	}
+	game = strings.ToLower(strings.TrimSpace(game))
 	if strings.TrimSpace(currency) == "" {
 		currency = "trx"
 	}
@@ -130,8 +132,11 @@ func (sm *ScriptModule) StartScript(script string, game string, currency string,
 	var placer scripting.BetPlacer
 	switch mode {
 	case "live":
-		if sm.session == nil || !sm.session.IsConnected() {
-			return fmt.Errorf("cannot start in live mode: no active session (set your API token in Settings first)")
+		if game != "dice" && game != "limbo" {
+			return fmt.Errorf("unsupported live game %q; live mode currently supports dice and limbo", game)
+		}
+		if sm.session == nil || !sm.session.IsConnected() || sm.session.ActiveConnectionState() != "connected" {
+			return fmt.Errorf("cannot start in live mode: account connection state must be connected")
 		}
 		client := sm.session.Client()
 		if client == nil {

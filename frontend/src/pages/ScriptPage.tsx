@@ -190,6 +190,7 @@ dobet = function() {
 ];
 
 const DEFAULT_SCRIPT = TEMPLATES[0].script;
+const LIVE_GAMES = new Set(['dice', 'limbo']);
 
 // Lazy-load Wails bindings
 let scriptBindingsPromise: Promise<typeof import('@wails/go/bindings/ScriptModule')> | null = null;
@@ -228,6 +229,12 @@ export function ScriptPage() {
     onChange: setScript,
     readOnly: state.state === 'running',
   });
+
+  useEffect(() => {
+    if (selectedMode === 'live' && !LIVE_GAMES.has(selectedGame)) {
+      setSelectedGame('dice');
+    }
+  }, [selectedMode, selectedGame]);
 
   // Poll script state while running
   const pollState = useCallback(async () => {
@@ -459,14 +466,18 @@ export function ScriptPage() {
               >
                 <option value="dice">Dice</option>
                 <option value="limbo">Limbo</option>
-                <option value="wheel">Wheel</option>
-                <option value="keno">Keno</option>
-                <option value="mines">Mines</option>
-                <option value="plinko">Plinko</option>
-                <option value="hilo">HiLo</option>
-                <option value="blackjack">Blackjack</option>
-                <option value="baccarat">Baccarat</option>
-                <option value="roulette">Roulette</option>
+                {selectedMode !== 'live' && (
+                  <>
+                    <option value="wheel">Wheel</option>
+                    <option value="keno">Keno</option>
+                    <option value="mines">Mines</option>
+                    <option value="plinko">Plinko</option>
+                    <option value="hilo">HiLo</option>
+                    <option value="blackjack">Blackjack</option>
+                    <option value="baccarat">Baccarat</option>
+                    <option value="roulette">Roulette</option>
+                  </>
+                )}
               </select>
               <select
                 value={selectedCurrency}

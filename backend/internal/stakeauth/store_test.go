@@ -33,6 +33,12 @@ func TestStoreSaveListGetDelete(t *testing.T) {
 	if acct.ID == "" {
 		t.Fatal("expected generated ID")
 	}
+	if acct.ProfileID == "" {
+		t.Fatal("expected generated profile ID")
+	}
+	if acct.ConnectionState != StateNotConfigured {
+		t.Fatalf("expected default state %q, got %q", StateNotConfigured, acct.ConnectionState)
+	}
 
 	list, err := s.List()
 	if err != nil {
@@ -51,16 +57,21 @@ func TestStoreSaveListGetDelete(t *testing.T) {
 	}
 
 	updated, err := s.Save(Account{
-		ID:       acct.ID,
-		Label:    "Renamed",
-		Mirror:   "stake.us",
-		Currency: "trx",
+		ID:              acct.ID,
+		Label:           "Renamed",
+		Mirror:          "stake.us",
+		Currency:        "trx",
+		ProfileID:       acct.ProfileID,
+		ConnectionState: StateDisconnected,
 	})
 	if err != nil {
 		t.Fatalf("update: %v", err)
 	}
 	if updated.Label != "Renamed" || updated.Mirror != "stake.us" || updated.Currency != "trx" {
 		t.Fatalf("unexpected updated account: %+v", updated)
+	}
+	if updated.ProfileID != acct.ProfileID || updated.ConnectionState != StateDisconnected {
+		t.Fatalf("unexpected updated state fields: %+v", updated)
 	}
 
 	if err := s.Delete(acct.ID); err != nil {
