@@ -14,10 +14,11 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/MJE43/stake-pf-replay-go-desktop/internal/livestore"
 )
+
+type eventEmitter func(eventName string, data ...any)
 
 // Server runs a local HTTP API for Antebot ingest and UI queries.
 type Server struct {
@@ -25,14 +26,14 @@ type Server struct {
 	token       string
 	addr        string // e.g. "127.0.0.1:8077"
 	httpServer  *http.Server
-	wailsCtx    context.Context
+	emit        eventEmitter
 	writeTimout time.Duration
 	readTimeout time.Duration
 }
 
 // New creates a live HTTP server bound to loopback at the given port.
 // token may be empty to disable token checks.
-func New(wailsCtx context.Context, store *livestore.Store, port int, token string) *Server {
+func New(store *livestore.Store, port int, token string, emit eventEmitter) *Server {
 	if port <= 0 {
 		port = 8077
 	}
@@ -40,7 +41,7 @@ func New(wailsCtx context.Context, store *livestore.Store, port int, token strin
 		store:       store,
 		token:       token,
 		addr:        fmt.Sprintf("127.0.0.1:%d", port),
-		wailsCtx:    wailsCtx,
+		emit:        emit,
 		writeTimout: 10 * time.Second,
 		readTimeout: 10 * time.Second,
 	}
@@ -156,7 +157,7 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, ctx context.Context, str
 	}
 
 	// Emit tick event for UI to update streak counters
-	runtime.EventsEmit(s.wailsCtx, "live:tick:"+streamID.String(), map[string]any{
+	s.emitEvent("live:tick:"+streamID.String(), map[string]any{
 		"nonce":       nonce,
 		"roundResult": p.RoundResult,
 	})
@@ -212,7 +213,7 @@ func (s *Server) handleBet(w http.ResponseWriter, ctx context.Context, streamID 
 
 	// Emit event for UI if accepted
 	if res.Accepted {
-		runtime.EventsEmit(s.wailsCtx, "live:newrows:"+streamID.String(), map[string]any{
+		s.emitEvent("live:newrows:"+streamID.String(), map[string]any{
 			"nonce":       p.Nonce,
 			"roundResult": p.RoundResult,
 		})
@@ -223,6 +224,12 @@ func (s *Server) handleBet(w http.ResponseWriter, ctx context.Context, streamID 
 		"accepted": res.Accepted,
 		"type":     "bet",
 	})
+}
+
+func (s *Server) emitEvent(eventName string, data ...any) {
+	if s.emit != nil {
+		s.emit(eventName, data...)
+	}
 }
 
 // GET /live/streams

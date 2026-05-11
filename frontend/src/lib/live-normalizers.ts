@@ -1,4 +1,4 @@
-import { livestore } from '@wails/go/models';
+import * as livestore from '@desktop-bindings/internal/livestore';
 import type { LiveBet, LiveBetPage } from '@/types/live';
 
 export type RawLiveBet = livestore.LiveBet | Record<string, unknown>;

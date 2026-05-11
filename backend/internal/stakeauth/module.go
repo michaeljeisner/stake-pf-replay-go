@@ -11,7 +11,7 @@ import (
 	"time"
 
 	"github.com/MJE43/stake-pf-replay-go/internal/stake"
-	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v3/pkg/application"
 	"github.com/zalando/go-keyring"
 )
 
@@ -60,6 +60,7 @@ type ActiveStatus struct {
 // Module provides Wails-bound auth/account/session functionality.
 type Module struct {
 	ctx     context.Context
+	app     *application.App
 	store   *Store
 	keyring *KeyringStore
 
@@ -84,6 +85,11 @@ func NewModule(store *Store, keyringStore *KeyringStore) *Module {
 // Startup captures wails context.
 func (m *Module) Startup(ctx context.Context) {
 	m.ctx = ctx
+}
+
+// SetApplication injects the Wails v3 application for native integrations.
+func (m *Module) SetApplication(app *application.App) {
+	m.app = app
 }
 
 func (m *Module) context() context.Context {
@@ -413,15 +419,14 @@ func (m *Module) OpenCasinoInBrowser(id string) error {
 	if err != nil {
 		return err
 	}
-	if m.ctx == nil {
-		return fmt.Errorf("wails context not initialized")
+	if m.app == nil {
+		return fmt.Errorf("wails application not initialized")
 	}
 	url := strings.TrimSpace(acct.Mirror)
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		url = "https://" + url
 	}
-	wruntime.BrowserOpenURL(m.ctx, url)
-	return nil
+	return m.app.Browser.OpenURL(url)
 }
 
 func (m *Module) RepairSession(id string) error {

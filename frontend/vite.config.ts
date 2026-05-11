@@ -8,7 +8,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
-      '@wails': fileURLToPath(new URL('./wailsjs', import.meta.url)),
+      '@bindings': fileURLToPath(new URL('./bindings/github.com/MJE43/stake-pf-replay-go', import.meta.url)),
+      '@desktop-bindings': fileURLToPath(new URL('./bindings/github.com/MJE43/stake-pf-replay-go-desktop', import.meta.url)),
     },
   },
   test: {

@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { IconArrowRight, IconFilter, IconChevronLeft, IconChevronRight } from '@tabler/icons-react';
-import { bindings, store } from '@wails/go/models';
+import * as bindings from '@bindings/bindings';
+import * as store from '@bindings/internal/store';
 import { Button } from '@/components/ui/button';
 import { cn } from '@/lib/utils';
 
@@ -23,7 +24,7 @@ function useGameOptions(): GameOption[] {
     let cancelled = false;
     const load = async () => {
       try {
-        const { GetGames } = await import('@wails/go/bindings/App');
+        const { GetGames } = await import('@bindings/bindings/app');
         const specs = await GetGames();
         if (cancelled || !Array.isArray(specs)) return;
         const gameOpts: GameOption[] = [

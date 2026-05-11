@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v3/pkg/application"
 
 	"github.com/MJE43/stake-pf-replay-go-desktop/internal/livestore"
 )
@@ -18,6 +18,7 @@ import (
 // The module emits UI events on new rows via the ingest handler.
 type LiveModule struct {
 	ctx    context.Context
+	app    *application.App
 	store  *livestore.Store
 	server *Server
 
@@ -42,17 +43,40 @@ func NewLiveModule(dbPath string, port int, token string) (*LiveModule, error) {
 	return m, nil
 }
 
+func (m *LiveModule) SetApplication(app *application.App) {
+	m.app = app
+}
+
 // Startup stores the Wails context and starts the local HTTP server.
 func (m *LiveModule) Startup(ctx context.Context) error {
 	m.ctx = ctx
-	m.server = New(ctx, m.store, m.port, m.token)
+	m.server = New(m.store, m.port, m.token, m.emit)
 	return m.server.Start()
+}
+
+func (m *LiveModule) ServiceStartup(ctx context.Context, _ application.ServiceOptions) error {
+	return m.Startup(ctx)
 }
 
 // Shutdown stops the HTTP server and closes the DB.
 func (m *LiveModule) Shutdown(ctx context.Context) error {
 	_ = m.server.Shutdown(ctx)
 	return m.store.Close()
+}
+
+func (m *LiveModule) ServiceShutdown() error {
+	ctx := m.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	return m.Shutdown(ctx)
+}
+
+func (m *LiveModule) emit(eventName string, data ...any) {
+	if m.app == nil {
+		return
+	}
+	m.app.Event.Emit(eventName, data...)
 }
 
 // ------------- Wails binding methods (UI calls) -------------
@@ -179,7 +203,7 @@ func (m *LiveModule) IngestInfo() IngestInfo {
 
 // EmitManualTick lets the UI force a "newrows" event (useful for testing the wiring).
 func (m *LiveModule) EmitManualTick(streamID string) {
-	runtime.EventsEmit(m.ctx, "live:newrows:"+streamID, map[string]any{"manual": true})
+	m.emit("live:newrows:"+streamID, map[string]any{"manual": true})
 }
 
 // ------------- Round-related methods (heartbeat data) -------------

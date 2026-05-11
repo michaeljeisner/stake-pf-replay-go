@@ -8,8 +8,8 @@ import {
   IconDatabase,
 } from '@tabler/icons-react';
 import { useNavigate } from 'react-router-dom';
-import { ListRuns } from '@wails/go/bindings/App';
-import { bindings } from '@wails/go/models';
+import { ListRuns } from '@bindings/bindings/app';
+import * as bindings from '@bindings/bindings';
 import { RunsTable } from '@/components/RunsTable';
 import { callWithRetry, waitForWailsBinding } from '@/lib/wails';
 import { Button } from '@/components/ui/button';

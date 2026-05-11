@@ -10,6 +10,7 @@ import (
 	"github.com/MJE43/stake-pf-replay-go/internal/scripting"
 	"github.com/MJE43/stake-pf-replay-go/internal/scriptstore"
 	"github.com/MJE43/stake-pf-replay-go/internal/stake"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // ScriptModule is the Wails-bound struct for scripting engine management.
@@ -98,6 +99,11 @@ func (sm *ScriptModule) InitStore(dbPath string) error {
 func (sm *ScriptModule) Startup(ctx context.Context) {
 	sm.ctx = ctx
 	sm.emitter.ctx = ctx
+}
+
+func (sm *ScriptModule) ServiceStartup(ctx context.Context, _ application.ServiceOptions) error {
+	sm.Startup(ctx)
+	return nil
 }
 
 // StartScript starts the scripting engine with the given script.

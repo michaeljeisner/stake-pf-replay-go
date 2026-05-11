@@ -27,10 +27,10 @@ Stake PF Replay Desktop is a Wails application that bundles a Go replay engine w
 
 ```bash
 # Development (hot reload)
-wails dev
+wails3 dev
 
 # Production build
-wails build
+wails3 build
 
 # Backend only (from backend/ directory)
 make -C backend test          # Run Go tests
@@ -51,7 +51,7 @@ npm --prefix frontend run test  # Vitest
 - Scanner uses worker pool pattern in `backend/internal/scan/scanner.go`
 
 **Frontend:**
-- Wails bindings auto-generated in `frontend/wailsjs/`
+- Wails bindings auto-generated in `frontend/bindings/`
 - UI components in `frontend/src/components/ui/` (shadcn primitives)
 - Pages routed via react-router-dom in `frontend/src/App.tsx`
 - Live tables use `react-virtuoso` TableVirtuoso for infinite scroll
@@ -64,7 +64,7 @@ npm --prefix frontend run test  # Vitest
 
 ## Important Patterns
 
-- When Go binding signatures change, regenerate Wails bindings: `wails generate module`
+- When Go binding signatures change, regenerate Wails bindings: `wails3 generate bindings -ts -clean`
 - Live bet tables sort newest first (nonce descending), use `/tail?since_id=X` for streaming updates
 - Server seeds are never logged in plaintext - only SHA256 hashes for security
 - SQLite for development/desktop; data files in OS-appropriate config directory

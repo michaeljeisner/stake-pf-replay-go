@@ -13,7 +13,7 @@ streams of bets, and review historical runs in a single desktop experience.
 - **Frontend** – React + Vite located in `frontend/`, implemented with Mantine UI v7, shadcn primitives, and
   Virtuoso for virtualized tables.
 - **Live ingest** – `internal/livehttp` persists incoming bets, exposes REST bindings, and emits
-  `runtime.EventsEmit` notifications for the live bet feed.
+  `app.Event.Emit` notifications for the live bet feed.
 
 > **Tip:** Use the `AGENTS.md` contributor guide for detailed conventions and onboarding instructions.
 
@@ -74,7 +74,7 @@ streams of bets, and review historical runs in a single desktop experience.
    ```
 2. **Run Wails dev shell**
    ```bash
-   wails dev
+   wails3 dev
    ```
    This spawns the desktop shell with hot-reload (Vite dev server on port 34115). Use the browser target if
    you want to inspect Go bindings via DevTools.
@@ -95,9 +95,9 @@ streams of bets, and review historical runs in a single desktop experience.
 
 Use Wails’ build pipeline to package the desktop app:
 ```bash
-wails build            # produces platform-specific binaries under build/
+wails3 build            # produces platform-specific binaries under build/
 ```
-On CI you can combine `npm --prefix frontend run build` with `wails build` to ensure the bundled frontend is
+On CI you can combine `npm --prefix frontend run build` with `wails3 build` to ensure the bundled frontend is
 compiled before packaging.
 
 ## Live Ingest Reference
@@ -120,7 +120,7 @@ compiled before packaging.
 
 ## Utilities
 
-- `scripts/wails-dev.sh` – helper script for running `wails dev` under a virtual framebuffer (useful on headless/WSL).
+- `scripts/wails-dev.sh` – helper script for running `wails3 dev` under a virtual framebuffer (useful on headless/WSL).
 - `AGENTS.md` – contributor guide covering structure, commands, conventions, and PR process.
 - `docs/ngrok.md` – tunnel the backend/UI/ingest services with ngrok for remote demos and AI agent access.
 

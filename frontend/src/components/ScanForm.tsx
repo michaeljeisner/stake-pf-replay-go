@@ -17,7 +17,8 @@ import {
 } from '@tabler/icons-react';
 import { scanFormSchema, validateGameParams } from '@/lib/validation';
 import { callWithRetry, waitForWailsBinding } from '@/lib/wails';
-import type { games } from '@wails/go/models';
+import type * as games from '@bindings/internal/games';
+import * as bindings from '@bindings/bindings';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { toast } from '@/components/ui/use-toast';
@@ -84,17 +85,11 @@ const NONCE_PRESETS: NoncePreset[] = [
 ];
 
 // Lazy-load Wails bindings
-let appBindingsPromise: Promise<typeof import('@wails/go/bindings/App')> | null = null;
-let modelBindingsPromise: Promise<typeof import('@wails/go/models')> | null = null;
+let appBindingsPromise: Promise<typeof import('@bindings/bindings/app')> | null = null;
 
 const getAppBindings = () => {
-  if (!appBindingsPromise) appBindingsPromise = import('@wails/go/bindings/App');
+  if (!appBindingsPromise) appBindingsPromise = import('@bindings/bindings/app');
   return appBindingsPromise;
-};
-
-const getModelBindings = () => {
-  if (!modelBindingsPromise) modelBindingsPromise = import('@wails/go/models');
-  return modelBindingsPromise;
 };
 
 // Section header component
@@ -836,7 +831,7 @@ export function ScanForm() {
         TimeoutMs: data.timeoutMs,
       };
 
-      const [{ StartScan }, { bindings }] = await Promise.all([getAppBindings(), getModelBindings()]);
+      const { StartScan } = await getAppBindings();
       const result = await StartScan(bindings.ScanRequest.createFrom(scanRequest));
       toast.success(`Scan started: ${result.RunID}`);
       navigate(`/runs/${result.RunID}`);

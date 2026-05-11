@@ -7,6 +7,7 @@ import (
 
 	"github.com/MJE43/stake-pf-replay-go/internal/stake"
 	"github.com/MJE43/stake-pf-replay-go/internal/stakeauth"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 // AuthModule exposes stakeauth.Module through the bindings package.
@@ -35,6 +36,19 @@ func NewAuthModule(dbPath, fallbackSecretsPath string) (*AuthModule, error) {
 
 func (m *AuthModule) Startup(ctx context.Context) {
 	m.inner.Startup(ctx)
+}
+
+func (m *AuthModule) SetApplication(app *application.App) {
+	m.inner.SetApplication(app)
+}
+
+func (m *AuthModule) ServiceStartup(ctx context.Context, _ application.ServiceOptions) error {
+	m.Startup(ctx)
+	return nil
+}
+
+func (m *AuthModule) ServiceShutdown() error {
+	return m.Shutdown()
 }
 
 func (m *AuthModule) Shutdown() error {

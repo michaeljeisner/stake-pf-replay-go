@@ -8,8 +8,9 @@ import {
   IconLoader2,
   IconX,
 } from '@tabler/icons-react';
-import { GetRun, GetSeedRuns } from '@wails/go/bindings/App';
-import { bindings, store } from '@wails/go/models';
+import { GetRun, GetSeedRuns } from '@bindings/bindings/app';
+import * as bindings from '@bindings/bindings';
+import * as store from '@bindings/internal/store';
 import { RunSummary, HitsTable, SeedRunWorkspace } from '@/components';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';

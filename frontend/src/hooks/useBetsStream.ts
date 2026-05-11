@@ -1,7 +1,7 @@
 import { useInfiniteQuery, useQueryClient } from '@tanstack/react-query';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { EventsOn } from '@wails/runtime/runtime';
-import { Tail } from '@wails/go/livehttp/LiveModule';
+import { EventsOn } from '@/lib/wails-events';
+import { Tail } from '@desktop-bindings/internal/livehttp/livemodule';
 import type { LiveBet, LiveBetPage } from '@/types/live';
 import { mergeRows, normalizeLiveBet, type RawLiveBet } from '@/lib/live-normalizers';
 import { loadBetsPageViaBridge } from '@/lib/live-api';
