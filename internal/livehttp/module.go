@@ -11,6 +11,7 @@ import (
 	"github.com/wailsapp/wails/v2/pkg/runtime"
 
 	"github.com/MJE43/stake-pf-replay-go-desktop/internal/livestore"
+	"github.com/MJE43/stake-pf-replay-go/bindings"
 )
 
 // LiveModule is a Wails-bound service that owns the DB and the local HTTP ingest server.
@@ -175,6 +176,56 @@ func (m *LiveModule) IngestInfo() IngestInfo {
 		URL:          fmt.Sprintf("http://127.0.0.1:%d/live/ingest", m.port),
 		TokenEnabled: m.token != "",
 	}
+}
+
+func (m *LiveModule) insertAppBetRecord(ctx context.Context, bet livestore.AppBet) error {
+	if ctx == nil {
+		ctx = m.ctx
+	}
+	return m.store.InsertAppBet(ctx, bet)
+}
+
+func NewAppBetSink(m *LiveModule) *AppBetSink {
+	return &AppBetSink{liveMod: m}
+}
+
+type AppBetSink struct {
+	liveMod *LiveModule
+}
+
+func (s *AppBetSink) InsertAppBet(ctx context.Context, event bindings.AppBetEvent) error {
+	if s == nil || s.liveMod == nil {
+		return nil
+	}
+	return s.liveMod.insertAppBetRecord(ctx, livestore.AppBet{
+		AccountID:         event.AccountID,
+		ScriptSessionID:   event.ScriptSessionID,
+		Game:              event.Game,
+		Currency:          event.Currency,
+		Amount:            event.Amount,
+		Condition:         event.Condition,
+		Target:            event.Target,
+		Multiplier:        event.Multiplier,
+		StakeResponseID:   event.StakeResponseID,
+		StakeResponseHash: event.StakeResponseHash,
+		Payout:            event.Payout,
+		Profit:            event.Profit,
+		ErrorKind:         event.ErrorKind,
+		PlacedAt:          event.PlacedAt,
+	})
+}
+
+type AppBetsPage struct {
+	Rows  []livestore.AppBet `json:"rows"`
+	Total int64              `json:"total"`
+}
+
+func (m *LiveModule) ListAppBets(accountID string, sessionID string, limit int, offset int) (AppBetsPage, error) {
+	rows, total, err := m.store.ListAppBets(m.ctx, accountID, sessionID, limit, offset)
+	if err != nil {
+		return AppBetsPage{}, err
+	}
+	return AppBetsPage{Rows: rows, Total: total}, nil
 }
 
 // EmitManualTick lets the UI force a "newrows" event (useful for testing the wiring).

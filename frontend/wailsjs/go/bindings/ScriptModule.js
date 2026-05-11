@@ -34,6 +34,10 @@ export function StartScript(arg1, arg2, arg3, arg4, arg5) {
   return window['go']['bindings']['ScriptModule']['StartScript'](arg1, arg2, arg3, arg4, arg5);
 }
 
+export function StartScriptWithOptions(arg1, arg2, arg3, arg4, arg5, arg6) {
+  return window['go']['bindings']['ScriptModule']['StartScriptWithOptions'](arg1, arg2, arg3, arg4, arg5, arg6);
+}
+
 export function Startup(arg1) {
   return window['go']['bindings']['ScriptModule']['Startup'](arg1);
 }

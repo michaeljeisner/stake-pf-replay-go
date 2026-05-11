@@ -166,9 +166,6 @@ func main() {
 		log.Fatalf("auth module init failed: %v", err)
 	}
 
-	// Scripting engine module
-	scriptMod := bindings.NewScriptModule(authMod)
-
 	// Live ingest module wiring
 	dbPath := defaultLiveDBPath()
 	port := envInt("LIVE_INGEST_PORT", 17888)
@@ -177,6 +174,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("live module init failed: %v", err)
 	}
+
+	// Scripting engine module
+	scriptMod := bindings.NewScriptModuleWithAppBetSink(authMod, livehttp.NewAppBetSink(liveMod))
 
 	// Initialize script session store
 	scriptDBPath := filepath.Join(dataDir, "script_sessions.db")

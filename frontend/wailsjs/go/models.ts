@@ -207,6 +207,28 @@ export namespace bindings {
 		}
 	}
 	
+	export class LiveScriptOptions {
+	    maxBet?: number;
+	    maxTotalWager?: number;
+	    maxLoss?: number;
+	    maxBets?: number;
+	    maxRuntimeSeconds?: number;
+	    stopOnSessionError?: boolean;
+
+	    static createFrom(source: any = {}) {
+	        return new LiveScriptOptions(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.maxBet = source["maxBet"];
+	        this.maxTotalWager = source["maxTotalWager"];
+	        this.maxLoss = source["maxLoss"];
+	        this.maxBets = source["maxBets"];
+	        this.maxRuntimeSeconds = source["maxRuntimeSeconds"];
+	        this.stopOnSessionError = source["stopOnSessionError"];
+	    }
+	}
 	export class RunsList {
 	    runs: store.Run[];
 	    totalCount: number;
@@ -568,6 +590,38 @@ export namespace games {
 
 export namespace livehttp {
 	
+	export class AppBetsPage {
+	    rows: livestore.AppBet[];
+	    total: number;
+
+	    static createFrom(source: any = {}) {
+	        return new AppBetsPage(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.rows = this.convertValues(source["rows"], livestore.AppBet);
+	        this.total = source["total"];
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class BetsPage {
 	    rows: livestore.LiveBet[];
 	    total: number;
@@ -747,6 +801,68 @@ export namespace livehttp {
 
 export namespace livestore {
 	
+	export class AppBet {
+	    id: number;
+	    account_id: string;
+	    script_session_id: string;
+	    game: string;
+	    currency: string;
+	    amount: number;
+	    condition: string;
+	    target: number;
+	    multiplier: number;
+	    stake_response_id: string;
+	    stake_response_hash: string;
+	    payout: number;
+	    profit: number;
+	    error_kind: string;
+	    // Go type: time
+	    created_at: any;
+	    // Go type: time
+	    placed_at: any;
+
+	    static createFrom(source: any = {}) {
+	        return new AppBet(source);
+	    }
+
+	    constructor(source: any = {}) {
+	        if ('string' === typeof source) source = JSON.parse(source);
+	        this.id = source["id"];
+	        this.account_id = source["account_id"];
+	        this.script_session_id = source["script_session_id"];
+	        this.game = source["game"];
+	        this.currency = source["currency"];
+	        this.amount = source["amount"];
+	        this.condition = source["condition"];
+	        this.target = source["target"];
+	        this.multiplier = source["multiplier"];
+	        this.stake_response_id = source["stake_response_id"];
+	        this.stake_response_hash = source["stake_response_hash"];
+	        this.payout = source["payout"];
+	        this.profit = source["profit"];
+	        this.error_kind = source["error_kind"];
+	        this.created_at = this.convertValues(source["created_at"], null);
+	        this.placed_at = this.convertValues(source["placed_at"], null);
+	    }
+
+		convertValues(a: any, classs: any, asMap: boolean = false): any {
+		    if (!a) {
+		        return a;
+		    }
+		    if (a.slice && a.map) {
+		        return (a as any[]).map(elem => this.convertValues(elem, classs));
+		    } else if ("object" === typeof a) {
+		        if (asMap) {
+		            for (const key of Object.keys(a)) {
+		                a[key] = new classs(a[key]);
+		            }
+		            return a;
+		        }
+		        return new classs(a);
+		    }
+		    return a;
+		}
+	}
 	export class LiveBet {
 	    id: number;
 	    stream_id: number[];
@@ -1395,4 +1511,3 @@ export namespace store {
 	}
 
 }
-

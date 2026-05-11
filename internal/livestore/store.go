@@ -52,6 +52,25 @@ type LiveBet struct {
 	RoundResult  float64   `json:"round_result"`
 }
 
+type AppBet struct {
+	ID                int64     `json:"id"`
+	AccountID         string    `json:"account_id"`
+	ScriptSessionID   string    `json:"script_session_id"`
+	Game              string    `json:"game"`
+	Currency          string    `json:"currency"`
+	Amount            float64   `json:"amount"`
+	Condition         string    `json:"condition"`
+	Target            float64   `json:"target"`
+	Multiplier        float64   `json:"multiplier"`
+	StakeResponseID   string    `json:"stake_response_id"`
+	StakeResponseHash string    `json:"stake_response_hash"`
+	Payout            float64   `json:"payout"`
+	Profit            float64   `json:"profit"`
+	ErrorKind         string    `json:"error_kind"`
+	CreatedAt         time.Time `json:"created_at"`
+	PlacedAt          time.Time `json:"placed_at"`
+}
+
 // IngestResult indicates whether a bet was stored or ignored as duplicate.
 type IngestResult struct {
 	Accepted bool   `json:"accepted"`
@@ -132,6 +151,28 @@ func (s *Store) migrate(ctx context.Context) error {
 		);`,
 		`CREATE INDEX IF NOT EXISTS idx_live_rounds_stream_nonce ON live_rounds(stream_id, nonce DESC);`,
 		`CREATE INDEX IF NOT EXISTS idx_live_rounds_stream_result ON live_rounds(stream_id, round_result DESC);`,
+
+		// App-originated bet ledger. Kept separate from external live ingest bets.
+		`CREATE TABLE IF NOT EXISTS app_bets (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			account_id TEXT NOT NULL,
+			script_session_id TEXT NOT NULL,
+			game TEXT NOT NULL,
+			currency TEXT NOT NULL,
+			amount REAL NOT NULL,
+			condition TEXT NOT NULL,
+			target REAL NOT NULL,
+			multiplier REAL NOT NULL,
+			stake_response_id TEXT NOT NULL DEFAULT '',
+			stake_response_hash TEXT NOT NULL DEFAULT '',
+			payout REAL NOT NULL DEFAULT 0,
+			profit REAL NOT NULL DEFAULT 0,
+			error_kind TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMP NOT NULL,
+			placed_at TIMESTAMP NOT NULL
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_app_bets_account_session_created ON app_bets(account_id, script_session_id, created_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_app_bets_created ON app_bets(created_at DESC);`,
 
 		// Optional mapping of hashed → plain
 		`CREATE TABLE IF NOT EXISTS seed_aliases (
@@ -374,6 +415,75 @@ func (s *Store) ListBets(ctx context.Context, streamID uuid.UUID, minResult floa
 		var b LiveBet
 		if err := rows.Scan(&b.ID, &b.StreamID, &b.AntebotBetID, &b.ReceivedAt, &b.DateTime, &b.Nonce,
 			&b.Amount, &b.Payout, &b.Difficulty, &b.RoundTarget, &b.RoundResult); err != nil {
+			return nil, 0, err
+		}
+		out = append(out, b)
+	}
+	return out, total, rows.Err()
+}
+
+// --------- App bets (app-originated ledger) ---------
+
+func (s *Store) InsertAppBet(ctx context.Context, bet AppBet) error {
+	now := time.Now().UTC()
+	if bet.CreatedAt.IsZero() {
+		bet.CreatedAt = now
+	}
+	if bet.PlacedAt.IsZero() {
+		bet.PlacedAt = bet.CreatedAt
+	}
+
+	_, err := s.db.ExecContext(ctx, `
+		INSERT INTO app_bets(
+			account_id, script_session_id, game, currency, amount, condition, target, multiplier,
+			stake_response_id, stake_response_hash, payout, profit, error_kind, created_at, placed_at
+		) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		bet.AccountID, bet.ScriptSessionID, strings.ToLower(bet.Game), normalizeAppCurrency(bet.Currency),
+		bet.Amount, bet.Condition, bet.Target, bet.Multiplier, bet.StakeResponseID, bet.StakeResponseHash,
+		bet.Payout, bet.Profit, strings.ToLower(bet.ErrorKind), bet.CreatedAt.UTC(), bet.PlacedAt.UTC())
+	return err
+}
+
+func (s *Store) ListAppBets(ctx context.Context, accountID, sessionID string, limit, offset int) ([]AppBet, int64, error) {
+	if limit <= 0 || limit > 10000 {
+		limit = 500
+	}
+	where := "1=1"
+	args := []any{}
+	if accountID != "" {
+		where += " AND account_id = ?"
+		args = append(args, accountID)
+	}
+	if sessionID != "" {
+		where += " AND script_session_id = ?"
+		args = append(args, sessionID)
+	}
+
+	var total int64
+	if err := s.db.QueryRowContext(ctx, "SELECT COUNT(*) FROM app_bets WHERE "+where, args...).Scan(&total); err != nil {
+		return nil, 0, err
+	}
+
+	pageQ := fmt.Sprintf(`
+		SELECT id, account_id, script_session_id, game, currency, amount, condition, target, multiplier,
+		       stake_response_id, stake_response_hash, payout, profit, error_kind, created_at, placed_at
+		FROM app_bets
+		WHERE %s
+		ORDER BY created_at DESC, id DESC
+		LIMIT ? OFFSET ?`, where)
+	args = append(args, limit, offset)
+	rows, err := s.db.QueryContext(ctx, pageQ, args...)
+	if err != nil {
+		return nil, 0, err
+	}
+	defer rows.Close()
+
+	var out []AppBet
+	for rows.Next() {
+		var b AppBet
+		if err := rows.Scan(&b.ID, &b.AccountID, &b.ScriptSessionID, &b.Game, &b.Currency, &b.Amount,
+			&b.Condition, &b.Target, &b.Multiplier, &b.StakeResponseID, &b.StakeResponseHash,
+			&b.Payout, &b.Profit, &b.ErrorKind, &b.CreatedAt, &b.PlacedAt); err != nil {
 			return nil, 0, err
 		}
 		out = append(out, b)
@@ -638,4 +748,15 @@ func isConstraintErr(err error) bool {
 	}
 	msg := strings.ToLower(err.Error())
 	return strings.Contains(msg, "constraint failed") || strings.Contains(msg, "unique constraint")
+}
+
+func normalizeAppCurrency(currency string) string {
+	switch strings.ToUpper(currency) {
+	case "SWEEPS":
+		return "SWEEPS"
+	case "GOLD":
+		return "GOLD"
+	default:
+		return strings.ToLower(currency)
+	}
 }

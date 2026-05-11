@@ -24,6 +24,8 @@ export function GetStreamWithRounds(arg1:string,arg2:number):Promise<livehttp.St
 
 export function IngestInfo():Promise<livehttp.IngestInfo>;
 
+export function ListAppBets(arg1:string,arg2:string,arg3:number,arg4:number):Promise<livehttp.AppBetsPage>;
+
 export function ListStreams(arg1:number,arg2:number):Promise<Array<livestore.LiveStream>>;
 
 export function Shutdown(arg1:context.Context):Promise<void>;

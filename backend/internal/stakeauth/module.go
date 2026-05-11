@@ -331,16 +331,20 @@ func (m *Module) Connect(id string) error {
 	balances, err := client.GetBalances(m.context())
 	if err != nil {
 		state, reason := stateForStakeError(err)
-		m.mu.Lock()
-		m.active = nil
-		m.activeID = ""
-		m.activeState = ActiveStatus{
-			Connected: false,
-			State:     state,
-			Reason:    reason,
-			Error:     err.Error(),
-		}
-		m.mu.Unlock()
+		checkedAt := time.Now().UTC()
+		lastCheckAt := checkedAt.Format(time.RFC3339)
+		_ = m.store.UpdateConnectionState(id, state, checkedAt)
+		acct.ConnectionState = state
+		acct.LastCheckAt = lastCheckAt
+		m.setActiveState(ActiveStatus{
+			Connected:   false,
+			State:       state,
+			Reason:      reason,
+			LastCheckAt: lastCheckAt,
+			AccountID:   id,
+			Account:     acct,
+			Error:       err.Error(),
+		})
 		return err
 	}
 
@@ -408,6 +412,54 @@ func (m *Module) ActiveConnectionState() string {
 	return m.activeState.State
 }
 
+func (m *Module) ActiveAccountID() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.activeID
+}
+
+func (m *Module) MarkSessionFailure(kind stake.ErrorKind, message string) {
+	if kind != stake.ErrorKindAuth && kind != stake.ErrorKindCloudflare {
+		return
+	}
+	m.mu.RLock()
+	id := m.activeID
+	acct := m.activeState.Account
+	m.mu.RUnlock()
+	if strings.TrimSpace(id) == "" {
+		return
+	}
+
+	state := StateCredentialFailed
+	code := "credential_failed"
+	if kind == stake.ErrorKindCloudflare {
+		state = StateNeedsBrowserRepair
+		code = "browser_session_failed"
+	}
+	if strings.TrimSpace(message) == "" {
+		message = string(kind)
+	}
+	checkedAt := time.Now().UTC()
+	lastCheckAt := checkedAt.Format(time.RFC3339)
+	_ = m.store.UpdateConnectionState(id, state, checkedAt)
+	if acct == nil {
+		acct, _ = m.store.Get(id)
+	}
+	if acct != nil {
+		acct.ConnectionState = state
+		acct.LastCheckAt = lastCheckAt
+	}
+	m.setActiveState(ActiveStatus{
+		Connected:   false,
+		State:       state,
+		Reason:      StateReason{Code: code, Message: message},
+		LastCheckAt: lastCheckAt,
+		AccountID:   id,
+		Account:     acct,
+		Error:       message,
+	})
+}
+
 func (m *Module) OpenCasinoInBrowser(id string) error {
 	acct, err := m.store.Get(strings.TrimSpace(id))
 	if err != nil {
@@ -458,7 +510,7 @@ func (m *Module) finishConnectionCheck(id string, acct *Account, checkedAt time.
 		acct.LastCheckAt = result.LastCheckAt
 	}
 	m.setActiveState(ActiveStatus{
-		Connected:   result.OK,
+		Connected:   false,
 		State:       result.State,
 		Reason:      result.Reason,
 		LastCheckAt: result.LastCheckAt,
@@ -497,6 +549,23 @@ func stateForStakeError(err error) (string, StateReason) {
 	var cfErr *stake.CloudflareError
 	if errors.As(err, &cfErr) {
 		return StateNeedsBrowserRepair, StateReason{Code: "browser_session_failed", Message: cfErr.Error()}
+	}
+	var httpErr *stake.HTTPError
+	if errors.As(err, &httpErr) {
+		if httpErr.IsRateLimited() {
+			return StateDisconnected, StateReason{Code: "rate_limited", Message: httpErr.Error()}
+		}
+		if httpErr.StatusCode >= 500 {
+			return StateDisconnected, StateReason{Code: "transient_failure", Message: httpErr.Error()}
+		}
+	}
+	var stakeErr *stake.StakeError
+	if errors.As(err, &stakeErr) && stakeErr.IsParallelBet() {
+		return StateDisconnected, StateReason{Code: "rate_or_parallel", Message: stakeErr.Error()}
+	}
+	var transportErr *stake.TransportError
+	if errors.As(err, &transportErr) && transportErr.IsRetryable() {
+		return StateDisconnected, StateReason{Code: "transient_failure", Message: transportErr.Error()}
 	}
 	return StateNeedsLogin, StateReason{Code: "connection_failed", Message: err.Error()}
 }

@@ -101,6 +101,14 @@ func (m *AuthModule) ActiveConnectionState() string {
 	return m.inner.ActiveConnectionState()
 }
 
+func (m *AuthModule) ActiveAccountID() string {
+	return m.inner.ActiveAccountID()
+}
+
+func (m *AuthModule) MarkSessionFailure(kind stake.ErrorKind, message string) {
+	m.inner.MarkSessionFailure(kind, message)
+}
+
 // DefaultFallbackSecretsPath builds a fallback secret file path.
 func DefaultFallbackSecretsPath(baseDir string) string {
 	return filepath.Join(baseDir, "auth_secrets_fallback.json")

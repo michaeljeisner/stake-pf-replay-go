@@ -21,6 +21,8 @@ export function ListScriptSessions(arg1:number,arg2:number):Promise<bindings.Scr
 
 export function StartScript(arg1:string,arg2:string,arg3:string,arg4:number,arg5:string):Promise<void>;
 
+export function StartScriptWithOptions(arg1:string,arg2:string,arg3:string,arg4:number,arg5:string,arg6:bindings.LiveScriptOptions):Promise<void>;
+
 export function Startup(arg1:context.Context):Promise<void>;
 
 export function StopScript():Promise<void>;

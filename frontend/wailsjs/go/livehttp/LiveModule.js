@@ -42,6 +42,10 @@ export function IngestInfo() {
   return window['go']['livehttp']['LiveModule']['IngestInfo']();
 }
 
+export function ListAppBets(arg1, arg2, arg3, arg4) {
+  return window['go']['livehttp']['LiveModule']['ListAppBets'](arg1, arg2, arg3, arg4);
+}
+
 export function ListStreams(arg1, arg2) {
   return window['go']['livehttp']['LiveModule']['ListStreams'](arg1, arg2);
 }

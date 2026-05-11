@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/MJE43/stake-pf-replay-go/internal/scripting"
 	"github.com/MJE43/stake-pf-replay-go/internal/scriptstore"
@@ -14,11 +15,12 @@ import (
 
 // ScriptModule is the Wails-bound struct for scripting engine management.
 type ScriptModule struct {
-	ctx     context.Context
-	mu      sync.RWMutex
-	engine  *scripting.Engine
-	session SessionProvider
-	store   *scriptstore.Store
+	ctx        context.Context
+	mu         sync.RWMutex
+	engine     *scripting.Engine
+	session    SessionProvider
+	store      *scriptstore.Store
+	appBetSink AppBetSink
 
 	// Current session tracking
 	currentSessionID string
@@ -57,6 +59,17 @@ type SessionProvider interface {
 	Client() *stake.Client
 	IsConnected() bool
 	ActiveConnectionState() string
+	ActiveAccountID() string
+	MarkSessionFailure(kind stake.ErrorKind, message string)
+}
+
+func hasLiveScriptOptions(options LiveScriptOptions) bool {
+	return options.MaxBet > 0 ||
+		options.MaxTotalWager > 0 ||
+		options.MaxLoss > 0 ||
+		options.MaxBets > 0 ||
+		options.MaxRuntimeSeconds > 0 ||
+		options.StopOnSessionError
 }
 
 func (e *wailsScriptEmitter) EmitScriptState(state scripting.EngineSnapshot) {
@@ -79,6 +92,12 @@ func NewScriptModule(session SessionProvider) *ScriptModule {
 	}
 }
 
+func NewScriptModuleWithAppBetSink(session SessionProvider, sink AppBetSink) *ScriptModule {
+	mod := NewScriptModule(session)
+	mod.appBetSink = sink
+	return mod
+}
+
 // InitStore initializes the script session store at the given path.
 // Should be called during application startup.
 func (sm *ScriptModule) InitStore(dbPath string) error {
@@ -94,6 +113,12 @@ func (sm *ScriptModule) InitStore(dbPath string) error {
 	return nil
 }
 
+func (sm *ScriptModule) setAppBetSink(sink AppBetSink) {
+	sm.mu.Lock()
+	defer sm.mu.Unlock()
+	sm.appBetSink = sink
+}
+
 // Startup is called by Wails on application startup.
 func (sm *ScriptModule) Startup(ctx context.Context) {
 	sm.ctx = ctx
@@ -103,6 +128,10 @@ func (sm *ScriptModule) Startup(ctx context.Context) {
 // StartScript starts the scripting engine with the given script.
 // mode: "simulated" (default) or "live" (uses real Stake API).
 func (sm *ScriptModule) StartScript(script string, game string, currency string, startBalance float64, mode string) error {
+	return sm.StartScriptWithOptions(script, game, currency, startBalance, mode, LiveScriptOptions{})
+}
+
+func (sm *ScriptModule) StartScriptWithOptions(script string, game string, currency string, startBalance float64, mode string, options LiveScriptOptions) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -130,6 +159,7 @@ func (sm *ScriptModule) StartScript(script string, game string, currency string,
 
 	// Choose the bet placer based on mode
 	var placer scripting.BetPlacer
+	var apiPlacer *ApiBetPlacer
 	switch mode {
 	case "live":
 		if game != "dice" && game != "limbo" {
@@ -144,7 +174,15 @@ func (sm *ScriptModule) StartScript(script string, game string, currency string,
 		}
 		// Ensure the client uses the script's currency
 		client.SetCurrency(currency)
-		placer = NewApiBetPlacer(client)
+		apiPlacer = NewApiBetPlacerWithConfig(client, ApiBetPlacerConfig{
+			AccountID:        sm.session.ActiveAccountID(),
+			Sink:             sm.appBetSink,
+			OnSessionFailure: sm.session.MarkSessionFailure,
+		})
+		placer = apiPlacer
+		if hasLiveScriptOptions(options) {
+			placer = NewSafetyBetPlacer(placer, options, time.Now())
+		}
 	default:
 		placer = &SimulatedBetPlacer{}
 	}
@@ -152,6 +190,7 @@ func (sm *ScriptModule) StartScript(script string, game string, currency string,
 	// Create a fresh engine each time
 	sm.engine = scripting.NewEngine(placer, sm.emitter)
 	sm.currentMode = mode
+	sm.currentSessionID = ""
 
 	// Create a persistent session if the store is initialized
 	if sm.store != nil {
@@ -167,6 +206,9 @@ func (sm *ScriptModule) StartScript(script string, game string, currency string,
 			log.Printf("scriptstore: failed to create session: %v", err)
 		} else {
 			sm.currentSessionID = id
+			if apiPlacer != nil {
+				apiPlacer.SetLedgerContext(sm.session.ActiveAccountID(), id, sm.appBetSink)
+			}
 			recorder := scriptstore.NewSessionRecorder(sm.store, id, 50)
 			sm.engine.SetRecorder(recorder)
 		}

@@ -43,6 +43,7 @@ type SecretsMasked = { hasApiKey: boolean; hasClearance: boolean; hasUserAgent: 
 
 const DOMAIN_OPTIONS = ['stake.com', 'stake.us', 'stake.bet'];
 const CURRENCY_OPTIONS = ['btc', 'eth', 'ltc', 'trx', 'usdc', 'doge', 'xrp'];
+const STAKE_US_CURRENCY_OPTIONS = [...CURRENCY_OPTIONS, 'SWEEPS', 'GOLD'];
 const STATE_LABELS: Record<string, string> = {
   not_configured: 'Not Configured',
   needs_login: 'Needs Login',
@@ -55,6 +56,16 @@ const STATE_LABELS: Record<string, string> = {
 
 function authModule(): any {
   return (window as any)?.go?.bindings?.AuthModule;
+}
+
+function currencyOptionsForMirror(mirror: string) {
+  return mirror === 'stake.us' ? STAKE_US_CURRENCY_OPTIONS : CURRENCY_OPTIONS;
+}
+
+function normalizeCurrencyForMirror(mirror: string, currency: string) {
+  const options = currencyOptionsForMirror(mirror);
+  if (options.includes(currency)) return currency;
+  return mirror === 'stake.us' ? 'SWEEPS' : 'btc';
 }
 
 export function AccountsPage() {
@@ -76,6 +87,7 @@ export function AccountsPage() {
   const [userAgent, setUserAgent] = useState('');
 
   const selected = useMemo(() => accounts.find((a) => a.id === selectedID) ?? null, [accounts, selectedID]);
+  const currencyOptions = useMemo(() => currencyOptionsForMirror(mirror), [mirror]);
 
   const refresh = useCallback(async () => {
     const mod = authModule();
@@ -86,11 +98,9 @@ export function AccountsPage() {
     const [list, status] = await Promise.all([mod.ListAccounts(), mod.GetActiveStatus()]);
     setAccounts((list ?? []) as Account[]);
     setActiveStatus((status ?? { connected: false, state: 'disconnected' }) as ActiveStatus);
-    if (!selectedID && Array.isArray(list) && list.length > 0) {
-      setSelectedID(list[0].id);
-    }
+    setSelectedID((current) => current || (Array.isArray(list) && list.length > 0 ? list[0].id : ''));
     setLoading(false);
-  }, [selectedID]);
+  }, []);
 
   useEffect(() => {
     refresh().catch((err) => {
@@ -108,7 +118,7 @@ export function AccountsPage() {
     }
     setLabel(selected.label ?? '');
     setMirror(selected.mirror || 'stake.com');
-    setCurrency(selected.currency || 'btc');
+    setCurrency(normalizeCurrencyForMirror(selected.mirror || 'stake.com', selected.currency || 'btc'));
     setCheckResult(null);
     const mod = authModule();
     if (!mod) return;
@@ -137,20 +147,20 @@ export function AccountsPage() {
     if (!mod) return;
     setSaving(true);
     try {
-      const saved = await mod.SaveAccount({
+      await mod.SaveAccount({
         id: selected.id,
         label,
         mirror,
-        currency,
+        currency: normalizeCurrencyForMirror(mirror, currency),
       });
-      setAccounts((prev) => prev.map((a) => (a.id === selected.id ? (saved as Account) : a)));
+      await refresh();
       toast.success('Account updated');
     } catch (err: any) {
       toast.error(err?.message ?? 'Failed to save account');
     } finally {
       setSaving(false);
     }
-  }, [selected, label, mirror, currency]);
+  }, [selected, label, mirror, currency, refresh]);
 
   const handleDelete = useCallback(async () => {
     if (!selected) return;
@@ -181,11 +191,12 @@ export function AccountsPage() {
       setUserAgent('');
       const updated = await mod.GetSecretsMasked(selected.id);
       setMasked(updated as SecretsMasked);
+      await refresh();
       toast.success('Secrets saved');
     } catch (err: any) {
       toast.error(err?.message ?? 'Failed to save secrets');
     }
-  }, [selected, apiKey, clearance, userAgent, masked.hasApiKey]);
+  }, [selected, apiKey, clearance, userAgent, masked.hasApiKey, refresh]);
 
   const handleCheck = useCallback(async () => {
     if (!selected) return;
@@ -200,12 +211,13 @@ export function AccountsPage() {
       } else {
         toast.error('Connection check failed');
       }
+      await refresh();
     } catch (err: any) {
       toast.error(err?.message ?? 'Connection check failed');
     } finally {
       setChecking(false);
     }
-  }, [selected]);
+  }, [selected, refresh]);
 
   const handleConnect = useCallback(async () => {
     if (!selected) return;
@@ -214,24 +226,22 @@ export function AccountsPage() {
     setConnecting(true);
     try {
       await mod.Connect(selected.id);
-      const status = await mod.GetActiveStatus();
-      setActiveStatus(status as ActiveStatus);
+      await refresh();
       toast.success('Connected');
     } catch (err: any) {
       toast.error(err?.message ?? 'Failed to connect');
     } finally {
       setConnecting(false);
     }
-  }, [selected]);
+  }, [selected, refresh]);
 
   const handleDisconnect = useCallback(async () => {
     const mod = authModule();
     if (!mod) return;
-    mod.Disconnect();
-    const status = await mod.GetActiveStatus();
-    setActiveStatus(status as ActiveStatus);
+    await mod.Disconnect();
+    await refresh();
     toast.success('Disconnected');
-  }, []);
+  }, [refresh]);
 
   const handleRepairSession = useCallback(async () => {
     if (!selected) return;
@@ -243,16 +253,18 @@ export function AccountsPage() {
       } else {
         await mod.OpenCasinoInBrowser(selected.id);
       }
-      const status = await mod.GetActiveStatus();
-      setActiveStatus(status as ActiveStatus);
+      await refresh();
     } catch (err: any) {
       toast.error(err?.message ?? 'Failed to open session repair');
     }
-  }, [selected]);
+  }, [selected, refresh]);
 
-  const selectedState = activeStatus.accountId === selected?.id
+  const selectedIsActiveConnected = Boolean(activeStatus.connected && activeStatus.accountId === selected?.id && activeStatus.state === 'connected');
+  const selectedState = selectedIsActiveConnected
     ? activeStatus.state
-    : selected?.connectionState ?? 'disconnected';
+    : selected?.connectionState === 'connected'
+      ? 'disconnected'
+      : selected?.connectionState ?? 'disconnected';
   const selectedStateLabel = STATE_LABELS[selectedState] ?? selectedState;
 
   return (
@@ -287,7 +299,12 @@ export function AccountsPage() {
               >
                 <div className="flex items-center justify-between gap-2">
                   <div className="font-mono text-xs text-foreground">{account.label || 'Untitled account'}</div>
-                  <IconChevronRight size={14} className="text-muted-foreground" />
+                  <div className="flex items-center gap-2">
+                    <span className="badge-terminal text-[10px] text-muted-foreground" aria-hidden="true">
+                      {STATE_LABELS[account.connectionState] ?? account.connectionState}
+                    </span>
+                    <IconChevronRight size={14} className="text-muted-foreground" />
+                  </div>
                 </div>
                 <div className="mt-1 font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
                   {account.mirror} • {account.currency}
@@ -309,7 +326,7 @@ export function AccountsPage() {
                 <h1 className="font-display text-sm uppercase tracking-widest">Account Settings</h1>
               </div>
               <div className="flex items-center gap-2">
-                {activeStatus.connected && activeStatus.accountId === selected.id && activeStatus.state === 'connected' ? (
+                {selectedIsActiveConnected ? (
                   <span className="badge-terminal text-emerald-300">Connected</span>
                 ) : (
                   <span className="badge-terminal text-muted-foreground">{selectedStateLabel}</span>
@@ -328,14 +345,22 @@ export function AccountsPage() {
               </div>
               <div>
                 <label className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Mirror</label>
-                <select className="h-9 w-full border border-border bg-background px-2 text-sm" value={mirror} onChange={(e) => setMirror(e.target.value)}>
+                <select
+                  className="h-9 w-full border border-border bg-background px-2 text-sm"
+                  value={mirror}
+                  onChange={(e) => {
+                    const nextMirror = e.target.value;
+                    setMirror(nextMirror);
+                    setCurrency((current) => normalizeCurrencyForMirror(nextMirror, current));
+                  }}
+                >
                   {DOMAIN_OPTIONS.map((d) => <option key={d} value={d}>{d}</option>)}
                 </select>
               </div>
               <div>
                 <label className="mb-1 block font-mono text-[10px] uppercase tracking-wider text-muted-foreground">Currency</label>
                 <select className="h-9 w-full border border-border bg-background px-2 text-sm" value={currency} onChange={(e) => setCurrency(e.target.value)}>
-                  {CURRENCY_OPTIONS.map((c) => <option key={c} value={c}>{c}</option>)}
+                  {currencyOptions.map((c) => <option key={c} value={c}>{c}</option>)}
                 </select>
               </div>
             </div>

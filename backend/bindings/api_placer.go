@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/MJE43/stake-pf-replay-go/internal/scripting"
 	"github.com/MJE43/stake-pf-replay-go/internal/stake"
@@ -18,16 +19,86 @@ type ApiBetPlacer struct {
 	mu                  sync.Mutex
 	consecutiveFails    int
 	maxConsecutiveFails int
+	accountID           string
+	scriptSessionID     string
+	sink                AppBetSink
+	onSessionFailure    func(stake.ErrorKind, string)
 }
 
 const defaultMaxConsecutiveFails = 5
 
 // NewApiBetPlacer creates a new ApiBetPlacer wrapping the given Stake client.
 func NewApiBetPlacer(client *stake.Client) *ApiBetPlacer {
+	return NewApiBetPlacerWithConfig(client, ApiBetPlacerConfig{})
+}
+
+type ApiBetPlacerConfig struct {
+	AccountID        string
+	ScriptSessionID  string
+	Sink             AppBetSink
+	OnSessionFailure func(stake.ErrorKind, string)
+}
+
+type AppBetSink interface {
+	InsertAppBet(ctx context.Context, event AppBetEvent) error
+}
+
+type AppBetEvent struct {
+	AccountID         string
+	ScriptSessionID   string
+	Game              string
+	Currency          string
+	Amount            float64
+	Condition         string
+	Target            float64
+	Multiplier        float64
+	StakeResponseID   string
+	StakeResponseHash string
+	Payout            float64
+	Profit            float64
+	ErrorKind         string
+	PlacedAt          time.Time
+}
+
+type LiveBetError struct {
+	Kind stake.ErrorKind
+	Err  error
+}
+
+func (e *LiveBetError) Error() string {
+	if e.Err == nil {
+		return string(e.Kind)
+	}
+	return e.Err.Error()
+}
+
+func (e *LiveBetError) Unwrap() error {
+	return e.Err
+}
+
+func NewApiBetPlacerWithConfig(client *stake.Client, cfg ApiBetPlacerConfig) *ApiBetPlacer {
 	return &ApiBetPlacer{
 		client:              client,
 		maxConsecutiveFails: defaultMaxConsecutiveFails,
+		accountID:           cfg.AccountID,
+		scriptSessionID:     cfg.ScriptSessionID,
+		sink:                cfg.Sink,
+		onSessionFailure:    cfg.OnSessionFailure,
 	}
+}
+
+func (p *ApiBetPlacer) SetLedgerContext(accountID, scriptSessionID string, sink AppBetSink) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.accountID = accountID
+	p.scriptSessionID = scriptSessionID
+	p.sink = sink
+}
+
+func (p *ApiBetPlacer) SetSessionFailureHandler(handler func(stake.ErrorKind, string)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.onSessionFailure = handler
 }
 
 // PlaceBet dispatches a bet to the appropriate Stake API endpoint based on
@@ -76,11 +147,34 @@ func (p *ApiBetPlacer) placeDiceBet(ctx context.Context, vars *scripting.Variabl
 		Amount:    vars.NextBet,
 	})
 	if err != nil {
-		return nil, classifyError(err)
+		classified := classifyLiveBetError(err)
+		p.handleSessionFailure(classified)
+		p.recordAppBet(ctx, AppBetEvent{
+			Game:      "dice",
+			Currency:  vars.Currency,
+			Amount:    vars.NextBet,
+			Condition: condition,
+			Target:    target,
+			ErrorKind: string(classified.Kind),
+			PlacedAt:  time.Now().UTC(),
+		})
+		return nil, classified
 	}
 
 	amount, _ := result.Amount.Float64()
 	payout, _ := result.Payout.Float64()
+	p.recordAppBet(ctx, AppBetEvent{
+		Game:            "dice",
+		Currency:        result.Currency,
+		Amount:          amount,
+		Condition:       condition,
+		Target:          result.State.Target,
+		Multiplier:      result.PayoutMultiplier,
+		StakeResponseID: result.ID,
+		Payout:          payout,
+		Profit:          payout - amount,
+		PlacedAt:        time.Now().UTC(),
+	})
 
 	return &scripting.BetResult{
 		Amount:      amount,
@@ -99,11 +193,31 @@ func (p *ApiBetPlacer) placeLimboBet(ctx context.Context, vars *scripting.Variab
 		Amount:           vars.NextBet,
 	})
 	if err != nil {
-		return nil, classifyError(err)
+		classified := classifyLiveBetError(err)
+		p.handleSessionFailure(classified)
+		p.recordAppBet(ctx, AppBetEvent{
+			Game:       "limbo",
+			Currency:   vars.Currency,
+			Amount:     vars.NextBet,
+			Multiplier: vars.Target,
+			ErrorKind:  string(classified.Kind),
+			PlacedAt:   time.Now().UTC(),
+		})
+		return nil, classified
 	}
 
 	amount, _ := result.Amount.Float64()
 	payout, _ := result.Payout.Float64()
+	p.recordAppBet(ctx, AppBetEvent{
+		Game:            "limbo",
+		Currency:        result.Currency,
+		Amount:          amount,
+		Multiplier:      vars.Target,
+		StakeResponseID: result.ID,
+		Payout:          payout,
+		Profit:          payout - amount,
+		PlacedAt:        time.Now().UTC(),
+	})
 
 	return &scripting.BetResult{
 		Amount:      amount,
@@ -113,6 +227,18 @@ func (p *ApiBetPlacer) placeLimboBet(ctx context.Context, vars *scripting.Variab
 		Roll:        result.State.Result,
 		Target:      vars.Target,
 	}, nil
+}
+
+func (p *ApiBetPlacer) recordAppBet(ctx context.Context, event AppBetEvent) {
+	if p.sink == nil {
+		return
+	}
+	event.AccountID = p.accountID
+	event.ScriptSessionID = p.scriptSessionID
+	if event.Currency == "" && p.client != nil {
+		event.Currency = p.client.Currency()
+	}
+	_ = p.sink.InsertAppBet(ctx, event)
 }
 
 func (p *ApiBetPlacer) placeKenoBet(ctx context.Context, vars *scripting.Variables) (*scripting.BetResult, error) {
@@ -551,4 +677,17 @@ func classifyError(err error) error {
 	}
 
 	return err
+}
+
+func classifyLiveBetError(err error) *LiveBetError {
+	return &LiveBetError{Kind: stake.ClassifyError(err), Err: classifyError(err)}
+}
+
+func (p *ApiBetPlacer) handleSessionFailure(err *LiveBetError) {
+	if err == nil || p.onSessionFailure == nil {
+		return
+	}
+	if err.Kind == stake.ErrorKindAuth || err.Kind == stake.ErrorKindCloudflare {
+		p.onSessionFailure(err.Kind, err.Error())
+	}
 }
