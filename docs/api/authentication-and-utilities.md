@@ -1,10 +1,61 @@
 # Stake API: Authentication and Utilities
 
-This document extracts all authentication, session management, and utility patterns from the bot2love extension for implementing a robust Go API client.
+This document extracts authentication, session management, and utility patterns from the bot2love extension and translates them into a desktop-safe design. The extension succeeds because it runs inside Stake's browser session; the desktop app must reproduce that property with a persistent embedded browser profile instead of assuming a detached Go HTTP client will survive Cloudflare.
 
 ---
 
 ## 1. Authentication
+
+### Product Architecture Requirement
+
+The product authentication model has two independent gates:
+
+1. **Stake account identity:** a user-authorized Stake API key or session credential proves the account.
+2. **Cloudflare/browser trust:** a real browser profile proves the client has completed Stake/Cloudflare browser flows from the user's environment.
+
+The supported desktop flow is:
+
+1. User creates a Stake account record with mirror/domain and API key.
+2. The app stores the API key in OS secret storage.
+3. The app creates a persistent embedded browser profile for that account.
+4. User logs in normally through the embedded browser.
+5. The app runs a connection check before enabling balance reads or betting calls.
+6. Stake API calls use the connected browser profile as the primary request authority.
+
+The app must not rely on automated Cloudflare bypasses or headless login. If Cloudflare/session trust fails, open the embedded browser and let the user complete the normal site flow.
+
+### Connection Check
+
+Every account selection and app startup should run these checks:
+
+| Check | Purpose | Pass Condition | Failure Handling |
+|-------|---------|----------------|------------------|
+| Mirror reachability | Confirms the selected Stake mirror is reachable | Basic browser request reaches the mirror without network/DNS failure | Show mirror/domain error and allow edit |
+| Browser session health | Confirms the persistent profile has usable browser trust/session state | Lightweight request from the embedded browser context returns expected JSON or a normal authenticated redirect, not a challenge/block page | Mark `needs_browser_repair` and open the embedded browser |
+| Account credentials | Confirms the API key/session can read account data | Harmless account call such as balances/user info returns the expected shape | Mark `credential_failed` and prompt for updated credentials |
+
+Betting calls must be disabled unless the account state is `connected`.
+
+### Request Authority
+
+The default transport should execute Stake requests from the embedded browser context that owns the session. The Go side should receive a narrow capability API, for example:
+
+```typescript
+interface StakeBrowserBridge {
+  graphql<T>(operationName: string, variables: unknown, query: string): Promise<T>;
+  casino<T>(path: string, body: unknown): Promise<T>;
+}
+```
+
+The bridge should:
+
+- Use the selected account's mirror/domain.
+- Attach the same headers/cookies the browser context naturally has.
+- Return structured JSON to Go/Wails.
+- Redact secrets before logging.
+- Surface Cloudflare/session failures as `needs_browser_repair`, not generic retryable betting errors.
+
+A direct Go `http.Client` transport populated from browser cookies is a fallback only. It is valid for internal experiments or platforms where it demonstrably works, but the roadmap should not depend on it as the primary Cloudflare-compatible path.
 
 ### Session Token Extraction
 
@@ -23,7 +74,8 @@ var tokenapi = getCookie("session");
 **Go Implementation Notes:**
 - Cookie name: `session`
 - Extract from `document.cookie` in browser context
-- For Go client: user must provide session token (from browser DevTools → Application → Cookies)
+- For desktop product code: prefer browser-context requests over exposing the raw session token to Go.
+- For fallback Go-client experiments: obtain session state from the selected persistent browser profile, not from user DevTools instructions.
 - Token is opaque string, no known expiry format
 
 ### x-access-token Header
@@ -52,10 +104,10 @@ The extension does not implement:
 - Expiry detection
 - Automatic re-authentication
 
-**Implications for Go client:**
-- User must manually provide valid session token
-- On 401/403 errors, prompt user to provide fresh token
-- No programmatic way to refresh without browser interaction
+**Implications for desktop product code:**
+- There is no reliable standalone token refresh endpoint.
+- On session failures, move the account to `needs_browser_repair` and open the embedded browser for user-driven repair.
+- Avoid "retry forever" behavior on 401/403 because those statuses may mean expired credentials, missing Cloudflare trust, account restrictions, or rate limiting.
 
 ### Supported Stake Domain Mirrors
 
@@ -76,10 +128,11 @@ All API calls construct URLs as:
 - `stake.bet`
 - Various mirror domains
 
-**Go Implementation:**
+**Desktop Implementation:**
 - Accept domain as configuration parameter
 - Default to `stake.com`
 - Allow override for mirrors/regional variants
+- Store the chosen mirror per account record
 
 ---
 
@@ -149,10 +202,12 @@ function outbals(json, newbal) {
 }
 ```
 
-**Go Implementation:**
+**Desktop Implementation:**
 - Endpoint: `POST https://{domain}/_api/graphql`
-- Filter balances array by desired currency
-- Return both `available` and `vault` amounts
+- Execute through the connected request authority.
+- Filter balances array by desired currency.
+- Return both `available` and `vault` amounts.
+- Use this as the account credential pass/fail check.
 
 ### 2.2 Vault Deposit
 
@@ -453,6 +508,7 @@ function betRequest({ url, body, retryParams = [], retryDelay = 1000 }) {
 - Max retry attempts (e.g., 3-5)
 - Respect user stop signal
 - Different handling for 403 vs other errors
+- Before retrying a 401/403, classify whether this is a session/Cloudflare failure. If yes, stop betting and mark the account `needs_browser_repair`.
 
 ### 3.5 Rate Limiting Indicators
 
@@ -568,13 +624,15 @@ headers: {
 
 **No other headers observed** (User-Agent, Origin, Referer not set explicitly)
 
-**Go Implementation:**
+**Fallback Go HTTP implementation:**
 ```go
 req.Header.Set("Content-Type", "application/json")
 req.Header.Set("x-access-token", sessionToken)
-// Optional: Add User-Agent to mimic browser
-req.Header.Set("User-Agent", "Mozilla/5.0 ...")
+// Any additional headers must come from the selected browser profile/session,
+// not from hard-coded header spoofing.
 ```
+
+The primary browser-context implementation should let the browser attach cookies, user-agent, and other site-required request metadata naturally.
 
 ### 5.3 Request Method
 
@@ -773,60 +831,46 @@ function baccaratbet(tie, player, banker) {
 
 ---
 
-## 6. Go Client Implementation Recommendations
+## 6. Client Implementation Recommendations
 
-### 6.1 Client Structure
+### 6.1 Request Facade
 
 ```go
 type StakeClient struct {
-    domain       string
-    sessionToken string
-    httpClient   *http.Client
-    currency     string
+    accountID string
+    mirror    string
+    currency  string
+    transport StakeTransport
 }
 
-func NewStakeClient(domain, sessionToken, currency string) *StakeClient {
+type StakeTransport interface {
+    GraphQL(ctx context.Context, operationName string, variables any, query string, result any) error
+    Casino(ctx context.Context, path string, body any, result any) error
+}
+
+func NewStakeClient(accountID, mirror, currency string, transport StakeTransport) *StakeClient {
     return &StakeClient{
-        domain:       domain,
-        sessionToken: sessionToken,
-        currency:     currency,
-        httpClient: &http.Client{
-            Timeout: 30 * time.Second,
-        },
+        accountID: accountID,
+        mirror:    mirror,
+        currency:  currency,
+        transport: transport,
     }
 }
 ```
 
-### 6.2 Request Helper
+`StakeTransport` should have two implementations:
+
+- `BrowserProfileTransport`: primary implementation; executes through the selected embedded browser profile.
+- `CookieJarHTTPTransport`: fallback implementation; uses cookies/headers from the browser profile only after the connection manager verifies it works.
+
+### 6.2 Betting Preflight
 
 ```go
-func (c *StakeClient) doRequest(ctx context.Context, path string, body interface{}, result interface{}) error {
-    url := fmt.Sprintf("https://%s/%s", c.domain, path)
-
-    jsonBody, err := json.Marshal(body)
-    if err != nil {
-        return err
+func (c *StakeClient) RequireConnected(state AccountConnectionState) error {
+    if state != AccountConnected {
+        return fmt.Errorf("stake account %s is not connected: %s", c.accountID, state)
     }
-
-    req, err := http.NewRequestWithContext(ctx, "POST", url, bytes.NewReader(jsonBody))
-    if err != nil {
-        return err
-    }
-
-    req.Header.Set("Content-Type", "application/json")
-    req.Header.Set("x-access-token", c.sessionToken)
-
-    resp, err := c.httpClient.Do(req)
-    if err != nil {
-        return err
-    }
-    defer resp.Body.Close()
-
-    if resp.StatusCode != http.StatusOK {
-        return fmt.Errorf("HTTP %d", resp.StatusCode)
-    }
-
-    return json.NewDecoder(resp.Body).Decode(result)
+    return nil
 }
 ```
 
@@ -869,7 +913,10 @@ func (c *StakeClient) doRequestWithRetry(ctx context.Context, path string, body 
 
         // Check if error is retryable
         if httpErr, ok := err.(*HTTPError); ok {
-            if httpErr.StatusCode == 403 || httpErr.StatusCode >= 500 {
+            if httpErr.StatusCode == 401 || httpErr.StatusCode == 403 {
+                return ErrNeedsBrowserRepair
+            }
+            if httpErr.StatusCode >= 500 {
                 delay := time.Duration(math.Min(float64(2<<attempt), 5)) * time.Second
                 select {
                 case <-time.After(delay):
@@ -917,7 +964,9 @@ func defaultClientSeed() string {
 - [x] Extract session token from `session` cookie
 - [x] Include `x-access-token` header in all requests
 - [x] Handle domain mirrors dynamically
-- [ ] No token refresh mechanism (manual user intervention required)
+- [x] Use persistent embedded browser profile as primary session authority
+- [x] Run mirror/session/credential connection checks before betting
+- [ ] No standalone token refresh mechanism; repair through user-driven embedded browser login
 
 **Account Operations:**
 - [x] Query user balances (GraphQL: `UserBalances`)
@@ -944,6 +993,7 @@ func defaultClientSeed() string {
 - [x] Standard headers: `Content-Type`, `x-access-token`
 - [x] `betRequest()` pattern for all game bets
 - [x] Automatic retry on failure
+- [x] Browser-profile transport is primary; direct Go HTTP is fallback only
 
 ---
 

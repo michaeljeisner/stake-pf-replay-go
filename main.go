@@ -154,13 +154,14 @@ func buildLinuxOptions() *linux.Options {
 
 func main() {
 	log.Printf("Starting WEN? (Go %s)...", runtime.Version())
+	dataDir := ensureAppDataDir()
 
 	// Existing backend bindings object
 	app := bindings.New()
 
 	// Stake account/auth module (multi-account + keyring + connection checks)
-	authDBPath := filepath.Join(appDataDir(), "auth.db")
-	authMod, err := bindings.NewAuthModule(authDBPath, bindings.DefaultFallbackSecretsPath(appDataDir()))
+	authDBPath := filepath.Join(dataDir, "auth.db")
+	authMod, err := bindings.NewAuthModule(authDBPath, bindings.DefaultFallbackSecretsPath(dataDir))
 	if err != nil {
 		log.Fatalf("auth module init failed: %v", err)
 	}
@@ -178,7 +179,7 @@ func main() {
 	}
 
 	// Initialize script session store
-	scriptDBPath := filepath.Join(appDataDir(), "script_sessions.db")
+	scriptDBPath := filepath.Join(dataDir, "script_sessions.db")
 	if err := scriptMod.InitStore(scriptDBPath); err != nil {
 		log.Printf("script store init failed (continuing without persistence): %v", err)
 	}
@@ -214,21 +215,21 @@ func main() {
 
 	if err := wails.Run(&options.App{
 		// Window Configuration
-		Title:            "WEN?",
-		Width:            1280,
-		Height:           800,
-		MinWidth:         1024,
-		MinHeight:        768,
-		MaxWidth:         2560,
-		MaxHeight:        1440,
-		WindowStartState: options.Normal,
-		Frameless:        false,
-		DisableResize:    false,
-		Fullscreen:       false,
-		StartHidden:      false,
+		Title:             "WEN?",
+		Width:             1280,
+		Height:            800,
+		MinWidth:          1024,
+		MinHeight:         768,
+		MaxWidth:          2560,
+		MaxHeight:         1440,
+		WindowStartState:  options.Normal,
+		Frameless:         false,
+		DisableResize:     false,
+		Fullscreen:        false,
+		StartHidden:       false,
 		HideWindowOnClose: false,
-		AlwaysOnTop:      false,
-		BackgroundColour: &options.RGBA{R: 10, G: 10, B: 10, A: 255},
+		AlwaysOnTop:       false,
+		BackgroundColour:  &options.RGBA{R: 10, G: 10, B: 10, A: 255},
 
 		// Asset Server
 		AssetServer: &assetserver.Options{
@@ -295,16 +296,7 @@ func main() {
 }
 
 func defaultLiveDBPath() string {
-	base := appDataDir()
-	if err := os.MkdirAll(base, 0o755); err != nil {
-		log.Printf("appdata mkdir failed: %v; using fallback", err)
-		if legacy := legacyLiveDBPath(); legacy != "" {
-			log.Printf("continuing to use legacy live ingest DB at %s", legacy)
-			return legacy
-		}
-		return filepath.Join(".", liveIngestDBName)
-	}
-
+	base := ensureAppDataDir()
 	target := filepath.Join(base, liveIngestDBName)
 
 	if _, err := os.Stat(target); errors.Is(err, os.ErrNotExist) {
@@ -318,6 +310,15 @@ func defaultLiveDBPath() string {
 	}
 
 	return target
+}
+
+func ensureAppDataDir() string {
+	base := appDataDir()
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		log.Printf("appdata mkdir failed for %s: %v; using local fallback", base, err)
+		return "."
+	}
+	return base
 }
 
 // appDataDir returns an OS-appropriate writable directory.
