@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"embed"
 	"errors"
 	"fmt"
@@ -17,6 +18,7 @@ import (
 
 	// Live-ingest module (this repo, root module)
 	"github.com/MJE43/stake-pf-replay-go-desktop/internal/livehttp"
+	"github.com/MJE43/stake-pf-replay-go-desktop/internal/livestore"
 )
 
 //go:embed all:frontend/dist
@@ -42,8 +44,6 @@ func main() {
 		log.Fatalf("auth module init failed: %v", err)
 	}
 
-	scriptMod := bindings.NewScriptModule(authMod)
-
 	dbPath := defaultLiveDBPath()
 	port := envInt("LIVE_INGEST_PORT", 17888)
 	token := os.Getenv("LIVE_INGEST_TOKEN")
@@ -51,6 +51,7 @@ func main() {
 	if err != nil {
 		log.Fatalf("live module init failed: %v", err)
 	}
+	scriptMod := bindings.NewScriptModuleWithLedger(authMod, liveLedgerRecorder{mod: liveMod})
 
 	scriptDBPath := filepath.Join(dataDir, "script_sessions.db")
 	if err := scriptMod.InitStore(scriptDBPath); err != nil {
@@ -72,7 +73,10 @@ func main() {
 			Handler: application.AssetFileServerFS(assets),
 		},
 		Windows: application.WindowsOptions{
-			WndClass: "WENWindow",
+			WndClass:              "WENWindow",
+			WebviewUserDataPath:   filepath.Join(dataDir, "webview"),
+			DisabledFeatures:      []string{"AutofillServerCommunication"},
+			AdditionalBrowserArgs: []string{"--disable-features=msWebOOUI,msPdfOOUI"},
 		},
 		Mac: application.MacOptions{
 			ApplicationShouldTerminateAfterLastWindowClosed: true,
@@ -142,6 +146,32 @@ func main() {
 	}
 
 	log.Println("Application exited normally")
+}
+
+type liveLedgerRecorder struct {
+	mod *livehttp.LiveModule
+}
+
+func (r liveLedgerRecorder) RecordLedgerEntry(_ context.Context, entry bindings.LedgerEntry) error {
+	if r.mod == nil {
+		return nil
+	}
+	_, err := r.mod.RecordLedgerEntry(livestore.LedgerEntry{
+		AccountID:        entry.AccountID,
+		Source:           entry.Source,
+		Game:             entry.Game,
+		ExternalBetID:    entry.ExternalBetID,
+		IdempotencyKey:   entry.IdempotencyKey,
+		Currency:         entry.Currency,
+		Nonce:            entry.Nonce,
+		Amount:           entry.Amount,
+		Payout:           entry.Payout,
+		PayoutMultiplier: entry.PayoutMultiplier,
+		RequestJSON:      entry.RequestJSON,
+		ResponseJSON:     entry.ResponseJSON,
+		CreatedAt:        entry.CreatedAt,
+	})
+	return err
 }
 
 func buildWindowsWindowOptions() application.WindowsWindow {

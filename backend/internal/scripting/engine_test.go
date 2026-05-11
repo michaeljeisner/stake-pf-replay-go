@@ -36,7 +36,7 @@ func (p *testBetPlacer) PlaceBet(ctx context.Context, vars *Variables) (*BetResu
 type noopEmitter struct{}
 
 func (e *noopEmitter) EmitScriptState(state EngineSnapshot) {}
-func (e *noopEmitter) EmitScriptLog(entries []LogEntry) {}
+func (e *noopEmitter) EmitScriptLog(entries []LogEntry)     {}
 
 func TestEngineStartStop(t *testing.T) {
 	placer := &testBetPlacer{}
@@ -157,6 +157,22 @@ func TestEngineNoDobetErrors(t *testing.T) {
 	}
 }
 
+func TestEngineMultiRoundRequiresRoundCallback(t *testing.T) {
+	eng := NewEngine(&testBetPlacer{}, &noopEmitter{})
+
+	err := eng.Start(`
+		game = "mines"
+		nextbet = 0.001
+		dobet = function() {}
+	`, 1.0)
+	if err == nil {
+		t.Fatal("expected missing round() error")
+	}
+	if err.Error() != "mines scripts must define a round() function" {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
 func TestEngineChartBuffer(t *testing.T) {
 	cb := NewChartBuffer(10)
 	for i := 0; i < 25; i++ {
@@ -207,4 +223,61 @@ func TestEngineGetLogs(t *testing.T) {
 	if !found {
 		t.Error("expected log message 'hello from script' in logs")
 	}
+}
+
+func TestEngineSafetyStopsAtMaxBets(t *testing.T) {
+	eng := NewEngine(&testBetPlacer{}, &noopEmitter{})
+	if err := eng.SetSafetyLimits(SafetyLimits{MaxBets: 3}); err != nil {
+		t.Fatalf("SetSafetyLimits: %v", err)
+	}
+
+	script := `
+		nextbet = 0.001
+		dobet = function() {
+			nextbet = 0.001
+		}
+	`
+	if err := eng.Start(script, 1.0); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	snap := waitForEngineState(t, eng, StateStopped, 2*time.Second)
+	if snap.Stats.Bets != 3 {
+		t.Fatalf("bets = %d, want 3", snap.Stats.Bets)
+	}
+}
+
+func TestEngineSafetyErrorsWhenNextBetExceedsMax(t *testing.T) {
+	eng := NewEngine(&testBetPlacer{}, &noopEmitter{})
+	if err := eng.SetSafetyLimits(SafetyLimits{MaxBetAmount: 0.001}); err != nil {
+		t.Fatalf("SetSafetyLimits: %v", err)
+	}
+
+	script := `
+		nextbet = 0.002
+		dobet = function() {}
+	`
+	if err := eng.Start(script, 1.0); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+
+	snap := waitForEngineState(t, eng, StateError, 2*time.Second)
+	if snap.Error == "" {
+		t.Fatal("expected safety error message")
+	}
+}
+
+func waitForEngineState(t *testing.T, eng *Engine, want State, timeout time.Duration) EngineSnapshot {
+	t.Helper()
+	deadline := time.Now().Add(timeout)
+	for time.Now().Before(deadline) {
+		snap := eng.GetState()
+		if snap.State == want {
+			return snap
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+	snap := eng.GetState()
+	t.Fatalf("state = %s, want %s; snapshot = %#v", snap.State, want, snap)
+	return snap
 }

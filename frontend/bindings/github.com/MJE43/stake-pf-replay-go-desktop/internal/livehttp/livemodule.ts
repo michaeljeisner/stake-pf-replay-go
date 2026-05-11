@@ -66,11 +66,20 @@ export function GetBetsPage(streamID: string, minMultiplier: number, order: stri
 }
 
 /**
+ * GetLedgerSummary returns aggregate account ledger stats for analysis views.
+ */
+export function GetLedgerSummary(accountID: string): $CancellablePromise<livestore$0.LedgerSummary> {
+    return $Call.ByID(925288271, accountID).then(($result: any) => {
+        return $$createType3($result);
+    });
+}
+
+/**
  * GetRecentRounds returns the most recent N rounds for a stream (for pattern visualization).
  */
 export function GetRecentRounds(streamID: string, limit: number): $CancellablePromise<livestore$0.LiveRound[]> {
     return $Call.ByID(3095428294, streamID, limit).then(($result: any) => {
-        return $$createType4($result);
+        return $$createType5($result);
     });
 }
 
@@ -79,7 +88,7 @@ export function GetRecentRounds(streamID: string, limit: number): $CancellablePr
  */
 export function GetRoundsPage(streamID: string, minResult: number, limit: number, offset: number): $CancellablePromise<$models.RoundsPage> {
     return $Call.ByID(1832703970, streamID, minResult, limit, offset).then(($result: any) => {
-        return $$createType5($result);
+        return $$createType6($result);
     });
 }
 
@@ -88,7 +97,7 @@ export function GetRoundsPage(streamID: string, minResult: number, limit: number
  */
 export function GetStream(streamID: string): $CancellablePromise<livestore$0.LiveStream> {
     return $Call.ByID(2795336976, streamID).then(($result: any) => {
-        return $$createType6($result);
+        return $$createType7($result);
     });
 }
 
@@ -97,13 +106,22 @@ export function GetStream(streamID: string): $CancellablePromise<livestore$0.Liv
  */
 export function GetStreamWithRounds(streamID: string, roundsLimit: number): $CancellablePromise<$models.StreamWithRounds> {
     return $Call.ByID(1936288281, streamID, roundsLimit).then(($result: any) => {
-        return $$createType7($result);
+        return $$createType8($result);
     });
 }
 
 export function IngestInfo(): $CancellablePromise<$models.IngestInfo> {
     return $Call.ByID(2435386624).then(($result: any) => {
-        return $$createType8($result);
+        return $$createType9($result);
+    });
+}
+
+/**
+ * ListLedgerEntries returns ledger rows for an account, newest first.
+ */
+export function ListLedgerEntries(accountID: string, limit: number, offset: number): $CancellablePromise<livestore$0.LedgerEntry[]> {
+    return $Call.ByID(3781278051, accountID, limit, offset).then(($result: any) => {
+        return $$createType11($result);
     });
 }
 
@@ -112,7 +130,16 @@ export function IngestInfo(): $CancellablePromise<$models.IngestInfo> {
  */
 export function ListStreams(limit: number, offset: number): $CancellablePromise<livestore$0.LiveStream[]> {
     return $Call.ByID(1795990421, limit, offset).then(($result: any) => {
-        return $$createType9($result);
+        return $$createType12($result);
+    });
+}
+
+/**
+ * RecordLedgerEntry records an app/history betting ledger row idempotently.
+ */
+export function RecordLedgerEntry(entry: livestore$0.LedgerEntry): $CancellablePromise<livestore$0.LedgerEntry> {
+    return $Call.ByID(3853036148, entry).then(($result: any) => {
+        return $$createType10($result);
     });
 }
 
@@ -134,9 +161,18 @@ export function Startup(): $CancellablePromise<void> {
     return $Call.ByID(2818583397);
 }
 
+/**
+ * SyncHistoryEntries records historical Stake bets into the account ledger.
+ */
+export function SyncHistoryEntries(accountID: string, entries: livestore$0.LedgerEntry[]): $CancellablePromise<livestore$0.HistorySyncResult> {
+    return $Call.ByID(4150762975, accountID, entries).then(($result: any) => {
+        return $$createType13($result);
+    });
+}
+
 export function Tail(streamID: string, sinceID: number, limit: number): $CancellablePromise<$models.TailResponse> {
     return $Call.ByID(1668402662, streamID, sinceID, limit).then(($result: any) => {
-        return $$createType10($result);
+        return $$createType14($result);
     });
 }
 
@@ -145,7 +181,7 @@ export function Tail(streamID: string, sinceID: number, limit: number): $Cancell
  */
 export function TailRounds(streamID: string, sinceNonce: number, limit: number): $CancellablePromise<$models.TailRoundsResponse> {
     return $Call.ByID(3117501495, streamID, sinceNonce, limit).then(($result: any) => {
-        return $$createType11($result);
+        return $$createType15($result);
     });
 }
 
@@ -160,12 +196,16 @@ export function UpdateNotes(streamID: string, notes: string): $CancellablePromis
 const $$createType0 = livestore$0.LiveBet.createFrom;
 const $$createType1 = $Create.Array($$createType0);
 const $$createType2 = $models.BetsPage.createFrom;
-const $$createType3 = livestore$0.LiveRound.createFrom;
-const $$createType4 = $Create.Array($$createType3);
-const $$createType5 = $models.RoundsPage.createFrom;
-const $$createType6 = livestore$0.LiveStream.createFrom;
-const $$createType7 = $models.StreamWithRounds.createFrom;
-const $$createType8 = $models.IngestInfo.createFrom;
-const $$createType9 = $Create.Array($$createType6);
-const $$createType10 = $models.TailResponse.createFrom;
-const $$createType11 = $models.TailRoundsResponse.createFrom;
+const $$createType3 = livestore$0.LedgerSummary.createFrom;
+const $$createType4 = livestore$0.LiveRound.createFrom;
+const $$createType5 = $Create.Array($$createType4);
+const $$createType6 = $models.RoundsPage.createFrom;
+const $$createType7 = livestore$0.LiveStream.createFrom;
+const $$createType8 = $models.StreamWithRounds.createFrom;
+const $$createType9 = $models.IngestInfo.createFrom;
+const $$createType10 = livestore$0.LedgerEntry.createFrom;
+const $$createType11 = $Create.Array($$createType10);
+const $$createType12 = $Create.Array($$createType7);
+const $$createType13 = livestore$0.HistorySyncResult.createFrom;
+const $$createType14 = $models.TailResponse.createFrom;
+const $$createType15 = $models.TailRoundsResponse.createFrom;

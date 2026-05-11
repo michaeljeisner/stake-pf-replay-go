@@ -52,6 +52,48 @@ type LiveBet struct {
 	RoundResult  float64   `json:"round_result"`
 }
 
+// LedgerEntry records any real-money Stake interaction that should be
+// replayable later: external ingest, app-placed bets, history sync, and future
+// strategy sessions.
+type LedgerEntry struct {
+	ID               int64     `json:"id"`
+	AccountID        string    `json:"account_id"`
+	Source           string    `json:"source"`
+	Game             string    `json:"game"`
+	ExternalBetID    string    `json:"external_bet_id,omitempty"`
+	IdempotencyKey   string    `json:"idempotency_key"`
+	Currency         string    `json:"currency"`
+	Nonce            int64     `json:"nonce"`
+	Amount           float64   `json:"amount"`
+	Payout           float64   `json:"payout"`
+	PayoutMultiplier float64   `json:"payout_multiplier"`
+	RequestJSON      string    `json:"request_json,omitempty"`
+	ResponseJSON     string    `json:"response_json,omitempty"`
+	CreatedAt        time.Time `json:"created_at"`
+}
+
+type LedgerGameSummary struct {
+	Game      string  `json:"game"`
+	Source    string  `json:"source"`
+	Count     int64   `json:"count"`
+	Wagered   float64 `json:"wagered"`
+	Payout    float64 `json:"payout"`
+	Profit    float64 `json:"profit"`
+	WinCount  int64   `json:"win_count"`
+	LastNonce int64   `json:"last_nonce"`
+}
+
+type LedgerSummary struct {
+	AccountID string              `json:"account_id"`
+	Count     int64               `json:"count"`
+	Wagered   float64             `json:"wagered"`
+	Payout    float64             `json:"payout"`
+	Profit    float64             `json:"profit"`
+	ROI       float64             `json:"roi"`
+	WinCount  int64               `json:"win_count"`
+	ByGame    []LedgerGameSummary `json:"by_game"`
+}
+
 // IngestResult indicates whether a bet was stored or ignored as duplicate.
 type IngestResult struct {
 	Accepted bool   `json:"accepted"`
@@ -140,6 +182,29 @@ func (s *Store) migrate(ctx context.Context) error {
 			first_seen TIMESTAMP NOT NULL,
 			last_seen  TIMESTAMP NOT NULL
 		);`,
+
+		// Unified productization ledger. This intentionally does not require a
+		// live stream because app-placed bets and synced history may exist before
+		// a stream is selected.
+		`CREATE TABLE IF NOT EXISTS ledger_entries (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			account_id TEXT NOT NULL,
+			source TEXT NOT NULL,
+			game TEXT NOT NULL,
+			external_bet_id TEXT NOT NULL DEFAULT '',
+			idempotency_key TEXT NOT NULL,
+			currency TEXT NOT NULL DEFAULT '',
+			nonce INTEGER NOT NULL DEFAULT 0,
+			amount REAL NOT NULL DEFAULT 0,
+			payout REAL NOT NULL DEFAULT 0,
+			payout_multiplier REAL NOT NULL DEFAULT 0,
+			request_json TEXT NOT NULL DEFAULT '',
+			response_json TEXT NOT NULL DEFAULT '',
+			created_at TIMESTAMP NOT NULL,
+			UNIQUE(idempotency_key)
+		);`,
+		`CREATE INDEX IF NOT EXISTS idx_ledger_entries_account_created ON ledger_entries(account_id, created_at DESC);`,
+		`CREATE INDEX IF NOT EXISTS idx_ledger_entries_game_nonce ON ledger_entries(game, nonce DESC);`,
 
 		// Migration: add columns to existing live_streams if they don't exist
 		// SQLite doesn't support IF NOT EXISTS for columns, so we use a workaround

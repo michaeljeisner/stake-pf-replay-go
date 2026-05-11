@@ -6,6 +6,7 @@ import (
 	"log"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/MJE43/stake-pf-replay-go/internal/scripting"
 	"github.com/MJE43/stake-pf-replay-go/internal/scriptstore"
@@ -20,6 +21,7 @@ type ScriptModule struct {
 	engine  *scripting.Engine
 	session SessionProvider
 	store   *scriptstore.Store
+	ledger  LedgerRecorder
 
 	// Current session tracking
 	currentSessionID string
@@ -58,6 +60,7 @@ type SessionProvider interface {
 	Client() *stake.Client
 	IsConnected() bool
 	ActiveConnectionState() string
+	ActiveAccountID() string
 }
 
 func (e *wailsScriptEmitter) EmitScriptState(state scripting.EngineSnapshot) {
@@ -73,9 +76,15 @@ func (e *wailsScriptEmitter) EmitScriptLog(entries []scripting.LogEntry) {
 
 // NewScriptModule creates a new ScriptModule ready to be bound.
 func NewScriptModule(session SessionProvider) *ScriptModule {
+	return NewScriptModuleWithLedger(session, nil)
+}
+
+// NewScriptModuleWithLedger creates a ScriptModule that records app-placed live bets.
+func NewScriptModuleWithLedger(session SessionProvider, ledger LedgerRecorder) *ScriptModule {
 	emitter := &wailsScriptEmitter{}
 	return &ScriptModule{
 		session: session,
+		ledger:  ledger,
 		emitter: emitter,
 	}
 }
@@ -109,6 +118,11 @@ func (sm *ScriptModule) ServiceStartup(ctx context.Context, _ application.Servic
 // StartScript starts the scripting engine with the given script.
 // mode: "simulated" (default) or "live" (uses real Stake API).
 func (sm *ScriptModule) StartScript(script string, game string, currency string, startBalance float64, mode string) error {
+	return sm.StartScriptWithSafety(script, game, currency, startBalance, mode, scripting.SafetyLimits{})
+}
+
+// StartScriptWithSafety starts a script with explicit backend-enforced limits.
+func (sm *ScriptModule) StartScriptWithSafety(script string, game string, currency string, startBalance float64, mode string, safety scripting.SafetyLimits) error {
 	sm.mu.Lock()
 	defer sm.mu.Unlock()
 
@@ -133,13 +147,19 @@ func (sm *ScriptModule) StartScript(script string, game string, currency string,
 	if mode == "" {
 		mode = "simulated"
 	}
+	if mode == "live" && safety.IsZero() {
+		safety = scripting.DefaultLiveSafetyLimits()
+	}
+	if err := safety.Validate(); err != nil {
+		return fmt.Errorf("invalid safety limits: %w", err)
+	}
 
 	// Choose the bet placer based on mode
 	var placer scripting.BetPlacer
 	switch mode {
 	case "live":
-		if game != "dice" && game != "limbo" {
-			return fmt.Errorf("unsupported live game %q; live mode currently supports dice and limbo", game)
+		if game != "dice" && game != "limbo" && game != "hilo" && game != "mines" && game != "blackjack" {
+			return fmt.Errorf("unsupported live game %q; live mode currently supports dice, limbo, hilo, mines, and blackjack", game)
 		}
 		if sm.session == nil || !sm.session.IsConnected() || sm.session.ActiveConnectionState() != "connected" {
 			return fmt.Errorf("cannot start in live mode: account connection state must be connected")
@@ -148,15 +168,21 @@ func (sm *ScriptModule) StartScript(script string, game string, currency string,
 		if client == nil {
 			return fmt.Errorf("cannot start in live mode: session client is nil")
 		}
+		if err := sm.assertNoActiveStateGames(client); err != nil {
+			return err
+		}
 		// Ensure the client uses the script's currency
 		client.SetCurrency(currency)
-		placer = NewApiBetPlacer(client)
+		placer = NewApiBetPlacerWithLedger(client, sm.session.ActiveAccountID(), sm.ledger)
 	default:
 		placer = &SimulatedBetPlacer{}
 	}
 
 	// Create a fresh engine each time
 	sm.engine = scripting.NewEngine(placer, sm.emitter)
+	if err := sm.engine.SetSafetyLimits(safety); err != nil {
+		return fmt.Errorf("invalid safety limits: %w", err)
+	}
 	sm.currentMode = mode
 
 	// Create a persistent session if the store is initialized
@@ -183,6 +209,30 @@ func (sm *ScriptModule) StartScript(script string, game string, currency string,
 		return fmt.Errorf("failed to start script: %w", err)
 	}
 
+	return nil
+}
+
+func (sm *ScriptModule) assertNoActiveStateGames(client *stake.Client) error {
+	ctx := sm.ctx
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	defer cancel()
+
+	for _, game := range []string{"hilo", "mines", "blackjack"} {
+		active, err := client.GetActiveBet(ctx, game)
+		if err != nil {
+			return fmt.Errorf("startup recovery failed for %s: %w", game, err)
+		}
+		if active != nil {
+			id := strings.TrimSpace(active.ID)
+			if id == "" {
+				id = "unknown"
+			}
+			return fmt.Errorf("cannot start automated live session: active %s bet %s requires recovery or cashout first", game, id)
+		}
+	}
 	return nil
 }
 

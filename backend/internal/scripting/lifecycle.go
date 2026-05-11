@@ -72,13 +72,13 @@ type BetRecorder interface {
 
 // EngineSnapshot is a serializable snapshot of the engine state.
 type EngineSnapshot struct {
-	State         State       `json:"state"`
-	Error         string      `json:"error,omitempty"`
-	Stats         *Statistics `json:"stats"`
+	State         State        `json:"state"`
+	Error         string       `json:"error,omitempty"`
+	Stats         *Statistics  `json:"stats"`
 	Chart         []ChartPoint `json:"chart"`
-	CurrentGame   string      `json:"currentGame"`
-	CurrentNonce  int         `json:"currentNonce"`
-	BetsPerSecond float64     `json:"betsPerSecond"`
+	CurrentGame   string       `json:"currentGame"`
+	CurrentNonce  int          `json:"currentNonce"`
+	BetsPerSecond float64      `json:"betsPerSecond"`
 }
 
 // Engine is the main scripting engine that orchestrates the bet lifecycle.
@@ -96,6 +96,7 @@ type Engine struct {
 	betPlacer BetPlacer
 	emitter   EventEmitter
 	recorder  BetRecorder
+	safety    SafetyLimits
 
 	startTime time.Time
 	lastEmit  time.Time
@@ -114,6 +115,15 @@ func NewEngine(placer BetPlacer, emitter EventEmitter) *Engine {
 // Must be called before Start().
 func (e *Engine) SetRecorder(rec BetRecorder) {
 	e.recorder = rec
+}
+
+// SetSafetyLimits attaches hard stop/error rails for this engine run.
+func (e *Engine) SetSafetyLimits(limits SafetyLimits) error {
+	if err := limits.Validate(); err != nil {
+		return err
+	}
+	e.safety = limits
+	return nil
 }
 
 // Start begins script execution. The script source is executed once to
@@ -155,6 +165,12 @@ func (e *Engine) Start(script string, startBalance float64) error {
 	dobetVal := e.vm.runtime.Get("dobet")
 	if dobetVal == nil || isUndefinedOrNull(dobetVal) {
 		err := fmt.Errorf("script must define a dobet() function")
+		e.setError(err)
+		cancel()
+		return err
+	}
+	if multiRoundGames[e.vars.Game] && !e.vm.HasRoundFunc() {
+		err := fmt.Errorf("%s scripts must define a round() function", e.vars.Game)
 		e.setError(err)
 		cancel()
 		return err
@@ -249,10 +265,24 @@ func (e *Engine) betLoop(ctx context.Context) {
 		e.mu.RLock()
 		nextBet := e.vars.NextBet
 		vars := e.vars
+		stats := e.stats
+		safety := e.safety
 		e.mu.RUnlock()
 
+		if stop, _ := shouldStopForSafety(stats, safety); stop {
+			e.mu.Lock()
+			e.state = StateStopped
+			e.vars.Running = false
+			e.mu.Unlock()
+			e.emitState()
+			return
+		}
 		if nextBet <= 0 {
 			e.setError(fmt.Errorf("nextbet must be > 0, got %f", nextBet))
+			return
+		}
+		if safety.MaxBetAmount > 0 && nextBet > safety.MaxBetAmount {
+			e.setError(fmt.Errorf("safety limit exceeded: nextbet %.8f is greater than maxBetAmount %.8f", nextBet, safety.MaxBetAmount))
 			return
 		}
 
@@ -329,16 +359,16 @@ func (e *Engine) betLoop(ctx context.Context) {
 
 		// 4. Update lastBet object
 		e.vars.LastBet = map[string]interface{}{
-			"amount":          result.Amount,
-			"win":             result.Win,
-			"Roll":            result.Roll,
+			"amount":           result.Amount,
+			"win":              result.Win,
+			"Roll":             result.Roll,
 			"payoutMultiplier": result.PayoutMulti,
-			"chance":          result.Chance,
-			"target":          result.Target,
-			"payout":          result.Payout,
-			"percent":         0.0,
-			"targetNumber":    result.TargetNumber,
-			"name":            nil,
+			"chance":           result.Chance,
+			"target":           result.Target,
+			"payout":           result.Payout,
+			"percent":          0.0,
+			"targetNumber":     result.TargetNumber,
+			"name":             nil,
 		}
 
 		// 5. Push updated state into VM
@@ -416,6 +446,22 @@ func (e *Engine) betLoop(ctx context.Context) {
 			}
 		}
 	}
+}
+
+func shouldStopForSafety(stats *Statistics, limits SafetyLimits) (bool, string) {
+	if stats == nil {
+		return false, ""
+	}
+	if limits.MaxBets > 0 && stats.Bets >= limits.MaxBets {
+		return true, "maxBets reached"
+	}
+	if limits.StopLoss > 0 && stats.Profit <= -limits.StopLoss {
+		return true, "stopLoss reached"
+	}
+	if limits.TakeProfit > 0 && stats.Profit >= limits.TakeProfit {
+		return true, "takeProfit reached"
+	}
+	return false, ""
 }
 
 // runMultiRoundLoop executes the inner action loop for multi-round games.

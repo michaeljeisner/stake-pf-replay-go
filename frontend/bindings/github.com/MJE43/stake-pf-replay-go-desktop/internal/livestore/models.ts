@@ -12,6 +12,210 @@ import * as uuid$0 from "../../../../google/uuid/models.js";
 // @ts-ignore: Unused imports
 import * as time$0 from "../../../../../time/models.js";
 
+export class HistorySyncResult {
+    "inserted": number;
+    "duplicates": number;
+    "entries": LedgerEntry[];
+
+    /** Creates a new HistorySyncResult instance. */
+    constructor($$source: Partial<HistorySyncResult> = {}) {
+        if (!("inserted" in $$source)) {
+            this["inserted"] = 0;
+        }
+        if (!("duplicates" in $$source)) {
+            this["duplicates"] = 0;
+        }
+        if (!("entries" in $$source)) {
+            this["entries"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new HistorySyncResult instance from a string or object.
+     */
+    static createFrom($$source: any = {}): HistorySyncResult {
+        const $$createField2_0 = $$createType1;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("entries" in $$parsedSource) {
+            $$parsedSource["entries"] = $$createField2_0($$parsedSource["entries"]);
+        }
+        return new HistorySyncResult($$parsedSource as Partial<HistorySyncResult>);
+    }
+}
+
+/**
+ * LedgerEntry records any real-money Stake interaction that should be
+ * replayable later: external ingest, app-placed bets, history sync, and future
+ * strategy sessions.
+ */
+export class LedgerEntry {
+    "id": number;
+    "account_id": string;
+    "source": string;
+    "game": string;
+    "external_bet_id"?: string;
+    "idempotency_key": string;
+    "currency": string;
+    "nonce": number;
+    "amount": number;
+    "payout": number;
+    "payout_multiplier": number;
+    "request_json"?: string;
+    "response_json"?: string;
+    "created_at": time$0.Time;
+
+    /** Creates a new LedgerEntry instance. */
+    constructor($$source: Partial<LedgerEntry> = {}) {
+        if (!("id" in $$source)) {
+            this["id"] = 0;
+        }
+        if (!("account_id" in $$source)) {
+            this["account_id"] = "";
+        }
+        if (!("source" in $$source)) {
+            this["source"] = "";
+        }
+        if (!("game" in $$source)) {
+            this["game"] = "";
+        }
+        if (!("idempotency_key" in $$source)) {
+            this["idempotency_key"] = "";
+        }
+        if (!("currency" in $$source)) {
+            this["currency"] = "";
+        }
+        if (!("nonce" in $$source)) {
+            this["nonce"] = 0;
+        }
+        if (!("amount" in $$source)) {
+            this["amount"] = 0;
+        }
+        if (!("payout" in $$source)) {
+            this["payout"] = 0;
+        }
+        if (!("payout_multiplier" in $$source)) {
+            this["payout_multiplier"] = 0;
+        }
+        if (!("created_at" in $$source)) {
+            this["created_at"] = null;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new LedgerEntry instance from a string or object.
+     */
+    static createFrom($$source: any = {}): LedgerEntry {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new LedgerEntry($$parsedSource as Partial<LedgerEntry>);
+    }
+}
+
+export class LedgerGameSummary {
+    "game": string;
+    "source": string;
+    "count": number;
+    "wagered": number;
+    "payout": number;
+    "profit": number;
+    "win_count": number;
+    "last_nonce": number;
+
+    /** Creates a new LedgerGameSummary instance. */
+    constructor($$source: Partial<LedgerGameSummary> = {}) {
+        if (!("game" in $$source)) {
+            this["game"] = "";
+        }
+        if (!("source" in $$source)) {
+            this["source"] = "";
+        }
+        if (!("count" in $$source)) {
+            this["count"] = 0;
+        }
+        if (!("wagered" in $$source)) {
+            this["wagered"] = 0;
+        }
+        if (!("payout" in $$source)) {
+            this["payout"] = 0;
+        }
+        if (!("profit" in $$source)) {
+            this["profit"] = 0;
+        }
+        if (!("win_count" in $$source)) {
+            this["win_count"] = 0;
+        }
+        if (!("last_nonce" in $$source)) {
+            this["last_nonce"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new LedgerGameSummary instance from a string or object.
+     */
+    static createFrom($$source: any = {}): LedgerGameSummary {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new LedgerGameSummary($$parsedSource as Partial<LedgerGameSummary>);
+    }
+}
+
+export class LedgerSummary {
+    "account_id": string;
+    "count": number;
+    "wagered": number;
+    "payout": number;
+    "profit": number;
+    "roi": number;
+    "win_count": number;
+    "by_game": LedgerGameSummary[];
+
+    /** Creates a new LedgerSummary instance. */
+    constructor($$source: Partial<LedgerSummary> = {}) {
+        if (!("account_id" in $$source)) {
+            this["account_id"] = "";
+        }
+        if (!("count" in $$source)) {
+            this["count"] = 0;
+        }
+        if (!("wagered" in $$source)) {
+            this["wagered"] = 0;
+        }
+        if (!("payout" in $$source)) {
+            this["payout"] = 0;
+        }
+        if (!("profit" in $$source)) {
+            this["profit"] = 0;
+        }
+        if (!("roi" in $$source)) {
+            this["roi"] = 0;
+        }
+        if (!("win_count" in $$source)) {
+            this["win_count"] = 0;
+        }
+        if (!("by_game" in $$source)) {
+            this["by_game"] = [];
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new LedgerSummary instance from a string or object.
+     */
+    static createFrom($$source: any = {}): LedgerSummary {
+        const $$createField7_0 = $$createType3;
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        if ("by_game" in $$parsedSource) {
+            $$parsedSource["by_game"] = $$createField7_0($$parsedSource["by_game"]);
+        }
+        return new LedgerSummary($$parsedSource as Partial<LedgerSummary>);
+    }
+}
+
 export class LiveBet {
     "id": number;
     "stream_id": uuid$0.UUID;
@@ -169,3 +373,9 @@ export class LiveStream {
         return new LiveStream($$parsedSource as Partial<LiveStream>);
     }
 }
+
+// Private type creation functions
+const $$createType0 = LedgerEntry.createFrom;
+const $$createType1 = $Create.Array($$createType0);
+const $$createType2 = LedgerGameSummary.createFrom;
+const $$createType3 = $Create.Array($$createType2);

@@ -68,3 +68,41 @@ export class LogEntry {
         return new LogEntry($$parsedSource as Partial<LogEntry>);
     }
 }
+
+/**
+ * SafetyLimits are hard backend rails for automated sessions. They apply to
+ * both simulated and live modes, but live sessions should always provide
+ * non-zero limits.
+ */
+export class SafetyLimits {
+    "maxBets": number;
+    "maxBetAmount": number;
+    "stopLoss": number;
+    "takeProfit": number;
+
+    /** Creates a new SafetyLimits instance. */
+    constructor($$source: Partial<SafetyLimits> = {}) {
+        if (!("maxBets" in $$source)) {
+            this["maxBets"] = 0;
+        }
+        if (!("maxBetAmount" in $$source)) {
+            this["maxBetAmount"] = 0;
+        }
+        if (!("stopLoss" in $$source)) {
+            this["stopLoss"] = 0;
+        }
+        if (!("takeProfit" in $$source)) {
+            this["takeProfit"] = 0;
+        }
+
+        Object.assign(this, $$source);
+    }
+
+    /**
+     * Creates a new SafetyLimits instance from a string or object.
+     */
+    static createFrom($$source: any = {}): SafetyLimits {
+        let $$parsedSource = typeof $$source === 'string' ? JSON.parse($$source) : $$source;
+        return new SafetyLimits($$parsedSource as Partial<SafetyLimits>);
+    }
+}

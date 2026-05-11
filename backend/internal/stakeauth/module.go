@@ -414,6 +414,12 @@ func (m *Module) ActiveConnectionState() string {
 	return m.activeState.State
 }
 
+func (m *Module) ActiveAccountID() string {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	return m.activeID
+}
+
 func (m *Module) OpenCasinoInBrowser(id string) error {
 	acct, err := m.store.Get(strings.TrimSpace(id))
 	if err != nil {
@@ -426,7 +432,33 @@ func (m *Module) OpenCasinoInBrowser(id string) error {
 	if !strings.HasPrefix(url, "http://") && !strings.HasPrefix(url, "https://") {
 		url = "https://" + url
 	}
-	return m.app.Browser.OpenURL(url)
+	windowName := "stake-session-" + safeWindowName(acct.ProfileID)
+	if existing, ok := m.app.Window.GetByName(windowName); ok {
+		existing.SetURL(url)
+		existing.Show()
+		existing.Focus()
+		return nil
+	}
+	m.app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Name:                       windowName,
+		Title:                      "Stake Session - " + displayAccountLabel(acct),
+		URL:                        url,
+		Width:                      1180,
+		Height:                     820,
+		MinWidth:                   960,
+		MinHeight:                  700,
+		BackgroundColour:           application.NewRGBA(10, 10, 10, 255),
+		Zoom:                       1.0,
+		ZoomControlEnabled:         false,
+		EnableFileDrop:             false,
+		DefaultContextMenuDisabled: false,
+		UseApplicationMenu:         true,
+		Windows: application.WindowsWindow{
+			BackdropType: application.Mica,
+			Theme:        application.SystemDefault,
+		},
+	})
+	return nil
 }
 
 func (m *Module) RepairSession(id string) error {
@@ -504,4 +536,40 @@ func stateForStakeError(err error) (string, StateReason) {
 		return StateNeedsBrowserRepair, StateReason{Code: "browser_session_failed", Message: cfErr.Error()}
 	}
 	return StateNeedsLogin, StateReason{Code: "connection_failed", Message: err.Error()}
+}
+
+func safeWindowName(value string) string {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return "default"
+	}
+	var b strings.Builder
+	for _, r := range value {
+		switch {
+		case r >= 'a' && r <= 'z':
+			b.WriteRune(r)
+		case r >= 'A' && r <= 'Z':
+			b.WriteRune(r)
+		case r >= '0' && r <= '9':
+			b.WriteRune(r)
+		case r == '-' || r == '_':
+			b.WriteRune(r)
+		default:
+			b.WriteRune('-')
+		}
+	}
+	return b.String()
+}
+
+func displayAccountLabel(acct *Account) string {
+	if acct == nil {
+		return "Account"
+	}
+	if label := strings.TrimSpace(acct.Label); label != "" {
+		return label
+	}
+	if mirror := strings.TrimSpace(acct.Mirror); mirror != "" {
+		return mirror
+	}
+	return "Account"
 }

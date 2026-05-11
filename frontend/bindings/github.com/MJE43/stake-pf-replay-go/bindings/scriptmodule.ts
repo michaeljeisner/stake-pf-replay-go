@@ -90,6 +90,13 @@ export function StartScript(script: string, game: string, currency: string, star
 }
 
 /**
+ * StartScriptWithSafety starts a script with explicit backend-enforced limits.
+ */
+export function StartScriptWithSafety(script: string, game: string, currency: string, startBalance: number, mode: string, safety: scripting$0.SafetyLimits): $CancellablePromise<void> {
+    return $Call.ByID(4053723219, script, game, currency, startBalance, mode, safety);
+}
+
+/**
  * Startup is called by Wails on application startup.
  */
 export function Startup(): $CancellablePromise<void> {

@@ -29,6 +29,11 @@ type Server struct {
 	emit        eventEmitter
 	writeTimout time.Duration
 	readTimeout time.Duration
+	// roundRetention bounds heartbeat storage per stream. Heartbeats are the
+	// cadence source of truth, but keeping them forever would grow the desktop DB
+	// without limit.
+	roundRetention       int
+	roundCleanupInterval int64
 }
 
 // New creates a live HTTP server bound to loopback at the given port.
@@ -38,12 +43,14 @@ func New(store *livestore.Store, port int, token string, emit eventEmitter) *Ser
 		port = 8077
 	}
 	return &Server{
-		store:       store,
-		token:       token,
-		addr:        fmt.Sprintf("127.0.0.1:%d", port),
-		emit:        emit,
-		writeTimout: 10 * time.Second,
-		readTimeout: 10 * time.Second,
+		store:                store,
+		token:                token,
+		addr:                 fmt.Sprintf("127.0.0.1:%d", port),
+		emit:                 emit,
+		writeTimout:          10 * time.Second,
+		readTimeout:          10 * time.Second,
+		roundRetention:       50_000,
+		roundCleanupInterval: 100,
 	}
 }
 
@@ -154,6 +161,12 @@ func (s *Server) handleHeartbeat(w http.ResponseWriter, ctx context.Context, str
 	if err := s.store.InsertRound(ctx, streamID, nonce, p.RoundResult); err != nil {
 		// Log but don't fail - the nonce update is more important
 		fmt.Printf("[livehttp] warning: failed to insert round: %v\n", err)
+	} else if s.shouldCleanupRounds(nonce) {
+		if err := s.store.CleanupOldRounds(ctx, streamID, s.roundRetention); err != nil {
+			// Retention failures should not drop live ingest. Surface them for logs
+			// and let the next heartbeat try again.
+			fmt.Printf("[livehttp] warning: failed to cleanup old rounds: %v\n", err)
+		}
 	}
 
 	// Emit tick event for UI to update streak counters
@@ -230,6 +243,14 @@ func (s *Server) emitEvent(eventName string, data ...any) {
 	if s.emit != nil {
 		s.emit(eventName, data...)
 	}
+}
+
+func (s *Server) shouldCleanupRounds(nonce int64) bool {
+	interval := s.roundCleanupInterval
+	if interval <= 0 {
+		interval = 1
+	}
+	return nonce%interval == 0
 }
 
 // GET /live/streams
@@ -412,7 +433,7 @@ func (s *Server) handleStreamTail(w http.ResponseWriter, r *http.Request, stream
 
 // GET /live/streams/{id}/rounds?limit=&min_result=
 func (s *Server) handleStreamRounds(w http.ResponseWriter, r *http.Request, streamID uuid.UUID) {
-	limit := clampInt(qInt(r, "limit", 200), 1, 1000)
+	limit := clampInt(qInt(r, "limit", 200), 1, 20000)
 	minResult := qFloat(r, "min_result", 0)
 
 	if minResult > 0 {

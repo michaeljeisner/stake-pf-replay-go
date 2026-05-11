@@ -1,7 +1,30 @@
-import { render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { AccountsPage } from './AccountsPage';
+
+const authMocks = vi.hoisted(() => ({
+  Connect: vi.fn(),
+  ConnectionCheck: vi.fn(),
+  DeleteAccount: vi.fn(),
+  Disconnect: vi.fn(),
+  GetActiveStatus: vi.fn(),
+  GetSecretsMasked: vi.fn(),
+  ListAccounts: vi.fn(),
+  OpenCasinoInBrowser: vi.fn(),
+  RepairSession: vi.fn(),
+  SaveAccount: vi.fn(),
+  SetSecrets: vi.fn(),
+}));
+
+const liveMocks = vi.hoisted(() => ({
+  GetLedgerSummary: vi.fn(),
+  ListLedgerEntries: vi.fn(),
+  SyncHistoryEntries: vi.fn(),
+}));
+
+vi.mock('@bindings/bindings/authmodule', () => authMocks);
+vi.mock('@desktop-bindings/internal/livehttp/livemodule', () => liveMocks);
 
 const account = {
   id: 'acct-1',
@@ -37,14 +60,30 @@ function installAuthModule(overrides: Record<string, unknown> = {}) {
     }),
     ...overrides,
   };
-  (window as any).go = { bindings: { AuthModule: mod } };
+  Object.assign(authMocks, mod);
+  liveMocks.GetLedgerSummary.mockResolvedValue({
+    account_id: account.id,
+    count: 0,
+    wagered: 0,
+    payout: 0,
+    profit: 0,
+    roi: 0,
+    win_count: 0,
+    by_game: [],
+  });
+  liveMocks.ListLedgerEntries.mockResolvedValue([]);
+  liveMocks.SyncHistoryEntries.mockResolvedValue({ inserted: 1, duplicates: 0, entries: [] });
   return mod;
 }
 
 describe('AccountsPage', () => {
   beforeEach(() => {
-    vi.restoreAllMocks();
-    delete (window as any).go;
+    for (const mock of Object.values(authMocks)) {
+      mock.mockReset();
+    }
+    for (const mock of Object.values(liveMocks)) {
+      mock.mockReset();
+    }
   });
 
   it('renders session repair state and browser_session check step', async () => {
@@ -68,5 +107,57 @@ describe('AccountsPage', () => {
     await user.click(screen.getByRole('button', { name: /repair session/i }));
 
     await waitFor(() => expect(mod.RepairSession).toHaveBeenCalledWith(account.id));
+  });
+
+  it('syncs pasted history into the selected account ledger', async () => {
+    installAuthModule();
+    liveMocks.GetLedgerSummary
+      .mockResolvedValueOnce({
+        account_id: account.id,
+        count: 0,
+        wagered: 0,
+        payout: 0,
+        profit: 0,
+        roi: 0,
+        win_count: 0,
+        by_game: [],
+      })
+      .mockResolvedValueOnce({
+        account_id: account.id,
+        count: 1,
+        wagered: 0.001,
+        payout: 0,
+        profit: -0.001,
+        roi: -1,
+        win_count: 0,
+        by_game: [{ game: 'dice', source: 'history', count: 1, wagered: 0.001, payout: 0, profit: -0.001, win_count: 0, last_nonce: 123 }],
+      });
+    const user = userEvent.setup();
+
+    render(<AccountsPage />);
+
+    const input = await screen.findByPlaceholderText(/\{"id":"stake-bet-1"/i);
+    fireEvent.change(input, { target: { value: JSON.stringify([{
+      id: 'stake-bet-1',
+      game: 'dice',
+      currency: 'btc',
+      nonce: 123,
+      amount: 0.001,
+      payout: 0,
+      payoutMultiplier: 0,
+      createdAt: '2026-05-11T09:00:00Z',
+    }]) } });
+    await user.click(screen.getByRole('button', { name: /sync/i }));
+
+    await waitFor(() => expect(liveMocks.SyncHistoryEntries).toHaveBeenCalledWith(account.id, [
+      expect.objectContaining({
+        account_id: account.id,
+        source: 'history',
+        game: 'dice',
+        external_bet_id: 'stake-bet-1',
+        nonce: 123,
+      }),
+    ]));
+    await waitFor(() => expect(screen.getAllByText('1 bets').length).toBeGreaterThan(0));
   });
 });

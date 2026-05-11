@@ -115,6 +115,10 @@ func (m *AuthModule) ActiveConnectionState() string {
 	return m.inner.ActiveConnectionState()
 }
 
+func (m *AuthModule) ActiveAccountID() string {
+	return m.inner.ActiveAccountID()
+}
+
 // DefaultFallbackSecretsPath builds a fallback secret file path.
 func DefaultFallbackSecretsPath(baseDir string) string {
 	return filepath.Join(baseDir, "auth_secrets_fallback.json")

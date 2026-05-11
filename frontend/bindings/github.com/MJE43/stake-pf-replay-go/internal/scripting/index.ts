@@ -3,5 +3,6 @@
 
 export {
     ChartPoint,
-    LogEntry
+    LogEntry,
+    SafetyLimits
 } from "./models.js";

@@ -20,6 +20,10 @@ import * as stakeauth$0 from "../internal/stakeauth/models.js";
 // @ts-ignore: Unused imports
 import * as application$0 from "../../../wailsapp/wails/v3/pkg/application/models.js";
 
+export function ActiveAccountID(): $CancellablePromise<string> {
+    return $Call.ByID(4237617483);
+}
+
 export function ActiveConnectionState(): $CancellablePromise<string> {
     return $Call.ByID(3875644724);
 }

@@ -2,9 +2,12 @@ package bindings
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/MJE43/stake-pf-replay-go/internal/scripting"
 	"github.com/MJE43/stake-pf-replay-go/internal/stake"
@@ -15,7 +18,10 @@ import (
 // Includes a circuit breaker that halts betting after repeated API failures.
 type ApiBetPlacer struct {
 	client              *stake.Client
+	accountID           string
+	ledger              LedgerRecorder
 	mu                  sync.Mutex
+	blackjackActions    map[string]bool
 	consecutiveFails    int
 	maxConsecutiveFails int
 }
@@ -24,8 +30,15 @@ const defaultMaxConsecutiveFails = 5
 
 // NewApiBetPlacer creates a new ApiBetPlacer wrapping the given Stake client.
 func NewApiBetPlacer(client *stake.Client) *ApiBetPlacer {
+	return NewApiBetPlacerWithLedger(client, "", nil)
+}
+
+// NewApiBetPlacerWithLedger records successful app-placed bets to the desktop ledger.
+func NewApiBetPlacerWithLedger(client *stake.Client, accountID string, ledger LedgerRecorder) *ApiBetPlacer {
 	return &ApiBetPlacer{
 		client:              client,
+		accountID:           accountID,
+		ledger:              ledger,
 		maxConsecutiveFails: defaultMaxConsecutiveFails,
 	}
 }
@@ -49,8 +62,14 @@ func (p *ApiBetPlacer) PlaceBet(ctx context.Context, vars *scripting.Variables) 
 		result, err = p.placeDiceBet(ctx, vars)
 	case "limbo":
 		result, err = p.placeLimboBet(ctx, vars)
+	case "hilo":
+		result, err = p.placeHiloBet(ctx, vars)
+	case "mines":
+		result, err = p.placeMinesBet(ctx, vars)
+	case "blackjack":
+		result, err = p.placeBlackjackBet(ctx, vars)
 	default:
-		return nil, fmt.Errorf("unsupported live game %q; live mode currently supports dice and limbo", vars.Game)
+		return nil, fmt.Errorf("unsupported live game %q; live mode currently supports dice, limbo, hilo, mines, and blackjack", vars.Game)
 	}
 
 	// Circuit breaker tracking
@@ -70,17 +89,21 @@ func (p *ApiBetPlacer) placeDiceBet(ctx context.Context, vars *scripting.Variabl
 		target = vars.Chance
 	}
 
-	result, err := p.client.DiceBet(ctx, stake.DiceBetRequest{
+	req := stake.DiceBetRequest{
 		Target:    target,
 		Condition: condition,
 		Amount:    vars.NextBet,
-	})
+	}
+	result, err := p.client.DiceBet(ctx, req)
 	if err != nil {
 		return nil, classifyError(err)
 	}
 
 	amount, _ := result.Amount.Float64()
 	payout, _ := result.Payout.Float64()
+	if err := p.recordLedger(ctx, "dice", result.BetResult, req, result); err != nil {
+		return nil, err
+	}
 
 	return &scripting.BetResult{
 		Amount:      amount,
@@ -94,16 +117,20 @@ func (p *ApiBetPlacer) placeDiceBet(ctx context.Context, vars *scripting.Variabl
 }
 
 func (p *ApiBetPlacer) placeLimboBet(ctx context.Context, vars *scripting.Variables) (*scripting.BetResult, error) {
-	result, err := p.client.LimboBet(ctx, stake.LimboBetRequest{
+	req := stake.LimboBetRequest{
 		MultiplierTarget: vars.Target,
 		Amount:           vars.NextBet,
-	})
+	}
+	result, err := p.client.LimboBet(ctx, req)
 	if err != nil {
 		return nil, classifyError(err)
 	}
 
 	amount, _ := result.Amount.Float64()
 	payout, _ := result.Payout.Float64()
+	if err := p.recordLedger(ctx, "limbo", result.BetResult, req, result); err != nil {
+		return nil, err
+	}
 
 	return &scripting.BetResult{
 		Amount:      amount,
@@ -113,6 +140,41 @@ func (p *ApiBetPlacer) placeLimboBet(ctx context.Context, vars *scripting.Variab
 		Roll:        result.State.Result,
 		Target:      vars.Target,
 	}, nil
+}
+
+func (p *ApiBetPlacer) recordLedger(ctx context.Context, game string, bet stake.BetResult, request any, response any) error {
+	if p.ledger == nil || p.accountID == "" {
+		return nil
+	}
+	amount, _ := bet.Amount.Float64()
+	payout, _ := bet.Payout.Float64()
+	reqJSON, _ := json.Marshal(request)
+	respJSON, _ := json.Marshal(response)
+
+	keyPart := bet.ID
+	if keyPart == "" {
+		keyPart = fmt.Sprintf("nonce:%d", bet.Nonce)
+	}
+	requestHash := sha256.Sum256(reqJSON)
+	entry := LedgerEntry{
+		AccountID:        p.accountID,
+		Source:           "app",
+		Game:             game,
+		ExternalBetID:    bet.ID,
+		IdempotencyKey:   fmt.Sprintf("stake:%s:%s:%s:%x", p.accountID, game, keyPart, requestHash[:6]),
+		Currency:         bet.Currency,
+		Nonce:            int64(bet.Nonce),
+		Amount:           amount,
+		Payout:           payout,
+		PayoutMultiplier: bet.PayoutMultiplier,
+		RequestJSON:      string(reqJSON),
+		ResponseJSON:     string(respJSON),
+		CreatedAt:        time.Now().UTC(),
+	}
+	if err := p.ledger.RecordLedgerEntry(ctx, entry); err != nil {
+		return fmt.Errorf("bet placed but ledger recording failed: %w", err)
+	}
+	return nil
 }
 
 func (p *ApiBetPlacer) placeKenoBet(ctx context.Context, vars *scripting.Variables) (*scripting.BetResult, error) {
@@ -272,16 +334,20 @@ func (p *ApiBetPlacer) placeHiloBet(ctx context.Context, vars *scripting.Variabl
 		}
 	}
 
-	result, err := p.client.HiLoBet(ctx, stake.HiLoBetRequest{
+	req := stake.HiLoBetRequest{
 		Amount:    vars.NextBet,
 		StartCard: startCard,
-	})
+	}
+	result, err := p.client.HiLoBet(ctx, req)
 	if err != nil {
 		return nil, classifyError(err)
 	}
 
 	amount, _ := result.Amount.Float64()
 	payout, _ := result.Payout.Float64()
+	if err := p.recordLedger(ctx, "hilo", *result, req, result); err != nil {
+		return nil, err
+	}
 
 	return &scripting.BetResult{
 		Amount:      amount,
@@ -297,17 +363,21 @@ func (p *ApiBetPlacer) placeMinesBet(ctx context.Context, vars *scripting.Variab
 		minesCount = 3
 	}
 
-	result, err := p.client.MinesBet(ctx, stake.MinesBetRequest{
+	req := stake.MinesBetRequest{
 		Amount:     vars.NextBet,
 		MinesCount: minesCount,
 		Fields:     vars.Fields,
-	})
+	}
+	result, err := p.client.MinesBet(ctx, req)
 	if err != nil {
 		return nil, classifyError(err)
 	}
 
 	amount, _ := result.Amount.Float64()
 	payout, _ := result.Payout.Float64()
+	if err := p.recordLedger(ctx, "mines", *result, req, result); err != nil {
+		return nil, err
+	}
 
 	return &scripting.BetResult{
 		Amount:      amount,
@@ -318,15 +388,20 @@ func (p *ApiBetPlacer) placeMinesBet(ctx context.Context, vars *scripting.Variab
 }
 
 func (p *ApiBetPlacer) placeBlackjackBet(ctx context.Context, vars *scripting.Variables) (*scripting.BetResult, error) {
-	result, err := p.client.BlackjackBet(ctx, stake.BlackjackBetRequest{
+	req := stake.BlackjackBetRequest{
 		Amount: vars.NextBet,
-	})
+	}
+	result, err := p.client.BlackjackBet(ctx, req)
 	if err != nil {
 		return nil, classifyError(err)
 	}
 
 	amount, _ := result.Amount.Float64()
 	payout, _ := result.Payout.Float64()
+	p.blackjackActions = blackjackActionsFromState(result.State)
+	if err := p.recordLedger(ctx, "blackjack", *result, req, result); err != nil {
+		return nil, err
+	}
 
 	return &scripting.BetResult{
 		Amount:      amount,
@@ -340,6 +415,9 @@ func (p *ApiBetPlacer) placeBlackjackBet(ctx context.Context, vars *scripting.Va
 
 // PlaceNextAction sends the next action for an active multi-round game.
 func (p *ApiBetPlacer) PlaceNextAction(ctx context.Context, game string, action interface{}) (*scripting.BetResult, bool, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	switch game {
 	case "hilo":
 		return p.hiloNext(ctx, action)
@@ -354,6 +432,9 @@ func (p *ApiBetPlacer) PlaceNextAction(ctx context.Context, game string, action 
 
 // Cashout cashes out the current active multi-round game.
 func (p *ApiBetPlacer) Cashout(ctx context.Context, game string) (*scripting.BetResult, error) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+
 	switch game {
 	case "hilo":
 		return p.hiloCashout(ctx)
@@ -404,6 +485,9 @@ func (p *ApiBetPlacer) hiloNext(ctx context.Context, action interface{}) (*scrip
 
 	amount, _ := result.Amount.Float64()
 	payout, _ := result.Payout.Float64()
+	if err := p.recordLedger(ctx, "hilo", *result, map[string]any{"guess": guess}, result); err != nil {
+		return nil, false, err
+	}
 
 	br := &scripting.BetResult{
 		Amount:      amount,
@@ -423,6 +507,9 @@ func (p *ApiBetPlacer) hiloCashout(ctx context.Context) (*scripting.BetResult, e
 
 	amount, _ := result.Amount.Float64()
 	payout, _ := result.Payout.Float64()
+	if err := p.recordLedger(ctx, "hilo", *result, map[string]any{"cashout": true}, result); err != nil {
+		return nil, err
+	}
 
 	return &scripting.BetResult{
 		Amount:      amount,
@@ -452,6 +539,9 @@ func (p *ApiBetPlacer) minesNext(ctx context.Context, action interface{}) (*scri
 
 	amount, _ := result.Amount.Float64()
 	payout, _ := result.Payout.Float64()
+	if err := p.recordLedger(ctx, "mines", *result, map[string]any{"field": field}, result); err != nil {
+		return nil, false, err
+	}
 
 	br := &scripting.BetResult{
 		Amount:      amount,
@@ -471,6 +561,9 @@ func (p *ApiBetPlacer) minesCashout(ctx context.Context) (*scripting.BetResult, 
 
 	amount, _ := result.Amount.Float64()
 	payout, _ := result.Payout.Float64()
+	if err := p.recordLedger(ctx, "mines", *result, map[string]any{"cashout": true}, result); err != nil {
+		return nil, err
+	}
 
 	return &scripting.BetResult{
 		Amount:      amount,
@@ -488,6 +581,9 @@ func (p *ApiBetPlacer) blackjackNext(ctx context.Context, action interface{}) (*
 	default:
 		return nil, false, fmt.Errorf("invalid Blackjack action type: %T (expected string)", action)
 	}
+	if len(p.blackjackActions) > 0 && !p.blackjackActions[actionStr] {
+		return nil, false, fmt.Errorf("blackjack action %q is not available in the current server state", actionStr)
+	}
 
 	result, err := p.client.BlackjackNext(ctx, actionStr)
 	if err != nil {
@@ -496,6 +592,10 @@ func (p *ApiBetPlacer) blackjackNext(ctx context.Context, action interface{}) (*
 
 	amount, _ := result.Amount.Float64()
 	payout, _ := result.Payout.Float64()
+	p.blackjackActions = blackjackActionsFromState(result.State)
+	if err := p.recordLedger(ctx, "blackjack", *result, map[string]any{"action": actionStr}, result); err != nil {
+		return nil, false, err
+	}
 
 	br := &scripting.BetResult{
 		Amount:      amount,
@@ -505,6 +605,38 @@ func (p *ApiBetPlacer) blackjackNext(ctx context.Context, action interface{}) (*
 	}
 
 	return br, result.Active, nil
+}
+
+func blackjackActionsFromState(raw json.RawMessage) map[string]bool {
+	if len(raw) == 0 {
+		return nil
+	}
+	var state struct {
+		Actions []string `json:"actions"`
+	}
+	if err := json.Unmarshal(raw, &state); err != nil || len(state.Actions) == 0 {
+		return nil
+	}
+	out := make(map[string]bool, len(state.Actions))
+	for _, action := range state.Actions {
+		switch action {
+		case "BLACKJACK_HIT":
+			out["hit"] = true
+		case "BLACKJACK_STAND":
+			out["stand"] = true
+		case "BLACKJACK_DOUBLE":
+			out["double"] = true
+		case "BLACKJACK_SPLIT":
+			out["split"] = true
+		case "BLACKJACK_INSURANCE":
+			out["insurance"] = true
+		case "BLACKJACK_NOINSURANCE":
+			out["noInsurance"] = true
+		default:
+			out[action] = true
+		}
+	}
+	return out
 }
 
 // GetBalance implements scripting.BalanceSyncer for periodic balance re-sync.

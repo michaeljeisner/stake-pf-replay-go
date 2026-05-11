@@ -281,3 +281,23 @@ func (m *LiveModule) GetStreamWithRounds(streamID string, roundsLimit int) (Stre
 	}
 	return StreamWithRounds{Stream: stream, Rounds: rounds}, nil
 }
+
+// RecordLedgerEntry records an app/history betting ledger row idempotently.
+func (m *LiveModule) RecordLedgerEntry(entry livestore.LedgerEntry) (livestore.LedgerEntry, error) {
+	return m.store.RecordLedgerEntry(m.ctx, entry)
+}
+
+// SyncHistoryEntries records historical Stake bets into the account ledger.
+func (m *LiveModule) SyncHistoryEntries(accountID string, entries []livestore.LedgerEntry) (livestore.HistorySyncResult, error) {
+	return m.store.SyncHistoryEntries(m.ctx, accountID, entries)
+}
+
+// ListLedgerEntries returns ledger rows for an account, newest first.
+func (m *LiveModule) ListLedgerEntries(accountID string, limit int, offset int) ([]livestore.LedgerEntry, error) {
+	return m.store.ListLedgerEntries(m.ctx, accountID, limit, offset)
+}
+
+// GetLedgerSummary returns aggregate account ledger stats for analysis views.
+func (m *LiveModule) GetLedgerSummary(accountID string) (livestore.LedgerSummary, error) {
+	return m.store.GetLedgerSummary(m.ctx, accountID)
+}

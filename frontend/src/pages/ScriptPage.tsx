@@ -205,6 +205,10 @@ export function ScriptPage() {
   const [selectedCurrency, setSelectedCurrency] = useState('trx');
   const [startBalance, setStartBalance] = useState(1.0);
   const [selectedMode, setSelectedMode] = useState<'simulated' | 'live'>('simulated');
+  const [maxBets, setMaxBets] = useState(1000);
+  const [maxBetAmount, setMaxBetAmount] = useState(0.001);
+  const [stopLoss, setStopLoss] = useState(0.01);
+  const [takeProfit, setTakeProfit] = useState(0);
   const [showTemplates, setShowTemplates] = useState(false);
   const [logFilter, setLogFilter] = useState('');
   const [state, setState] = useState<ScriptState>({
@@ -306,8 +310,17 @@ export function ScriptPage() {
     setElapsed(0);
     setStartedAt(Date.now());
     try {
-      const { StartScript } = await getScriptBindings();
-      await StartScript(script, selectedGame, selectedCurrency, startBalance, selectedMode);
+      const { StartScript, StartScriptWithSafety } = await getScriptBindings();
+      if (selectedMode === 'live') {
+        await StartScriptWithSafety(script, selectedGame, selectedCurrency, startBalance, selectedMode, {
+          maxBets,
+          maxBetAmount,
+          stopLoss,
+          takeProfit,
+        });
+      } else {
+        await StartScript(script, selectedGame, selectedCurrency, startBalance, selectedMode);
+      }
       setState(prev => ({ ...prev, state: 'running' }));
       toast.success(`Script started (${selectedMode} mode)`);
     } catch (err: any) {
@@ -316,7 +329,7 @@ export function ScriptPage() {
     } finally {
       setStarting(false);
     }
-  }, [script, selectedGame, selectedCurrency, startBalance, selectedMode]);
+  }, [script, selectedGame, selectedCurrency, startBalance, selectedMode, maxBets, maxBetAmount, stopLoss, takeProfit]);
 
   const handleStop = useCallback(async () => {
     try {
@@ -537,6 +550,39 @@ export function ScriptPage() {
             </div>
           </div>
 
+          {selectedMode === 'live' && !isRunning && (
+            <div className="grid gap-3 border border-red-500/25 bg-red-500/5 p-3 sm:grid-cols-2 xl:grid-cols-4">
+              <LimitInput
+                label="Max Bets"
+                value={maxBets}
+                min={1}
+                step={1}
+                onChange={setMaxBets}
+              />
+              <LimitInput
+                label="Max Bet"
+                value={maxBetAmount}
+                min={0.00000001}
+                step={0.00000001}
+                onChange={setMaxBetAmount}
+              />
+              <LimitInput
+                label="Stop Loss"
+                value={stopLoss}
+                min={0}
+                step={0.00000001}
+                onChange={setStopLoss}
+              />
+              <LimitInput
+                label="Take Profit"
+                value={takeProfit}
+                min={0}
+                step={0.00000001}
+                onChange={setTakeProfit}
+              />
+            </div>
+          )}
+
           {/* Template library dropdown */}
           {showTemplates && !isRunning && (
             <div className="border border-primary/20 bg-[hsl(var(--card))] p-3">
@@ -719,6 +765,37 @@ export function ScriptPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function LimitInput({
+  label,
+  value,
+  min,
+  step,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  step: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="font-mono text-[9px] uppercase tracking-wider text-red-300/80">{label}</span>
+      <input
+        type="number"
+        min={min}
+        step={step}
+        value={value}
+        onChange={(e) => {
+          const next = Number(e.target.value);
+          onChange(Number.isFinite(next) ? next : min);
+        }}
+        className="h-8 border border-red-500/25 bg-background px-2 font-mono text-[11px] text-foreground focus:border-red-400/60 focus:outline-none"
+      />
+    </label>
   );
 }
 
