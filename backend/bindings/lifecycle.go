@@ -7,6 +7,7 @@ import (
 	"sync"
 
 	"github.com/MJE43/stake-pf-replay-go/internal/store"
+	"github.com/wailsapp/wails/v3/pkg/application"
 )
 
 type App struct {
@@ -16,10 +17,10 @@ type App struct {
 	runCancelsMux sync.RWMutex
 }
 
-func New() *App { 
+func New() *App {
 	return &App{
 		runCancels: make(map[string]context.CancelFunc),
-	} 
+	}
 }
 
 func (a *App) Startup(ctx context.Context) {
@@ -45,4 +46,9 @@ func (a *App) Startup(ctx context.Context) {
 	if err := a.db.Migrate(); err != nil {
 		panic(err)
 	}
+}
+
+func (a *App) ServiceStartup(ctx context.Context, _ application.ServiceOptions) error {
+	a.Startup(ctx)
+	return nil
 }

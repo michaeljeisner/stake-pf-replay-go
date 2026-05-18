@@ -190,11 +190,12 @@ dobet = function() {
 ];
 
 const DEFAULT_SCRIPT = TEMPLATES[0].script;
+const LIVE_GAMES = new Set(['dice', 'limbo']);
 
 // Lazy-load Wails bindings
-let scriptBindingsPromise: Promise<typeof import('@wails/go/bindings/ScriptModule')> | null = null;
+let scriptBindingsPromise: Promise<typeof import('@bindings/bindings/scriptmodule')> | null = null;
 const getScriptBindings = () => {
-  if (!scriptBindingsPromise) scriptBindingsPromise = import('@wails/go/bindings/ScriptModule');
+  if (!scriptBindingsPromise) scriptBindingsPromise = import('@bindings/bindings/scriptmodule');
   return scriptBindingsPromise;
 };
 
@@ -204,6 +205,10 @@ export function ScriptPage() {
   const [selectedCurrency, setSelectedCurrency] = useState('trx');
   const [startBalance, setStartBalance] = useState(1.0);
   const [selectedMode, setSelectedMode] = useState<'simulated' | 'live'>('simulated');
+  const [maxBets, setMaxBets] = useState(1000);
+  const [maxBetAmount, setMaxBetAmount] = useState(0.001);
+  const [stopLoss, setStopLoss] = useState(0.01);
+  const [takeProfit, setTakeProfit] = useState(0);
   const [showTemplates, setShowTemplates] = useState(false);
   const [logFilter, setLogFilter] = useState('');
   const [state, setState] = useState<ScriptState>({
@@ -228,6 +233,12 @@ export function ScriptPage() {
     onChange: setScript,
     readOnly: state.state === 'running',
   });
+
+  useEffect(() => {
+    if (selectedMode === 'live' && !LIVE_GAMES.has(selectedGame)) {
+      setSelectedGame('dice');
+    }
+  }, [selectedMode, selectedGame]);
 
   // Poll script state while running
   const pollState = useCallback(async () => {
@@ -299,8 +310,17 @@ export function ScriptPage() {
     setElapsed(0);
     setStartedAt(Date.now());
     try {
-      const { StartScript } = await getScriptBindings();
-      await StartScript(script, selectedGame, selectedCurrency, startBalance, selectedMode);
+      const { StartScript, StartScriptWithSafety } = await getScriptBindings();
+      if (selectedMode === 'live') {
+        await StartScriptWithSafety(script, selectedGame, selectedCurrency, startBalance, selectedMode, {
+          maxBets,
+          maxBetAmount,
+          stopLoss,
+          takeProfit,
+        });
+      } else {
+        await StartScript(script, selectedGame, selectedCurrency, startBalance, selectedMode);
+      }
       setState(prev => ({ ...prev, state: 'running' }));
       toast.success(`Script started (${selectedMode} mode)`);
     } catch (err: any) {
@@ -309,7 +329,7 @@ export function ScriptPage() {
     } finally {
       setStarting(false);
     }
-  }, [script, selectedGame, selectedCurrency, startBalance, selectedMode]);
+  }, [script, selectedGame, selectedCurrency, startBalance, selectedMode, maxBets, maxBetAmount, stopLoss, takeProfit]);
 
   const handleStop = useCallback(async () => {
     try {
@@ -459,14 +479,18 @@ export function ScriptPage() {
               >
                 <option value="dice">Dice</option>
                 <option value="limbo">Limbo</option>
-                <option value="wheel">Wheel</option>
-                <option value="keno">Keno</option>
-                <option value="mines">Mines</option>
-                <option value="plinko">Plinko</option>
-                <option value="hilo">HiLo</option>
-                <option value="blackjack">Blackjack</option>
-                <option value="baccarat">Baccarat</option>
-                <option value="roulette">Roulette</option>
+                {selectedMode !== 'live' && (
+                  <>
+                    <option value="wheel">Wheel</option>
+                    <option value="keno">Keno</option>
+                    <option value="mines">Mines</option>
+                    <option value="plinko">Plinko</option>
+                    <option value="hilo">HiLo</option>
+                    <option value="blackjack">Blackjack</option>
+                    <option value="baccarat">Baccarat</option>
+                    <option value="roulette">Roulette</option>
+                  </>
+                )}
               </select>
               <select
                 value={selectedCurrency}
@@ -525,6 +549,39 @@ export function ScriptPage() {
               )}
             </div>
           </div>
+
+          {selectedMode === 'live' && !isRunning && (
+            <div className="grid gap-3 border border-red-500/25 bg-red-500/5 p-3 sm:grid-cols-2 xl:grid-cols-4">
+              <LimitInput
+                label="Max Bets"
+                value={maxBets}
+                min={1}
+                step={1}
+                onChange={setMaxBets}
+              />
+              <LimitInput
+                label="Max Bet"
+                value={maxBetAmount}
+                min={0.00000001}
+                step={0.00000001}
+                onChange={setMaxBetAmount}
+              />
+              <LimitInput
+                label="Stop Loss"
+                value={stopLoss}
+                min={0}
+                step={0.00000001}
+                onChange={setStopLoss}
+              />
+              <LimitInput
+                label="Take Profit"
+                value={takeProfit}
+                min={0}
+                step={0.00000001}
+                onChange={setTakeProfit}
+              />
+            </div>
+          )}
 
           {/* Template library dropdown */}
           {showTemplates && !isRunning && (
@@ -708,6 +765,37 @@ export function ScriptPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+function LimitInput({
+  label,
+  value,
+  min,
+  step,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min: number;
+  step: number;
+  onChange: (value: number) => void;
+}) {
+  return (
+    <label className="flex flex-col gap-1">
+      <span className="font-mono text-[9px] uppercase tracking-wider text-red-300/80">{label}</span>
+      <input
+        type="number"
+        min={min}
+        step={step}
+        value={value}
+        onChange={(e) => {
+          const next = Number(e.target.value);
+          onChange(Number.isFinite(next) ? next : min);
+        }}
+        className="h-8 border border-red-500/25 bg-background px-2 font-mono text-[11px] text-foreground focus:border-red-400/60 focus:outline-none"
+      />
+    </label>
   );
 }
 

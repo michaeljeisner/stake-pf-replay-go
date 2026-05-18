@@ -10,9 +10,9 @@ import {
   IconSearch,
   IconTrash,
 } from '@tabler/icons-react';
-import { EventsOn } from '@wails/runtime/runtime';
-import { ListStreams, DeleteStream, IngestInfo } from '@wails/go/livehttp/LiveModule';
-import { livestore } from '@wails/go/models';
+import { EventsOn } from '@/lib/wails-events';
+import { ListStreams, DeleteStream, IngestInfo } from '@desktop-bindings/internal/livehttp/livemodule';
+import * as livestore from '@desktop-bindings/internal/livestore';
 import { callWithRetry, waitForWailsBinding } from '@/lib/wails';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';

@@ -16,7 +16,7 @@ Avoid leaving tunnels up longer than necessary—stop them once the task finishe
 | ------ | ------------ | ------------ | ----- |
 | Backend API | `8080` (`PORT` override supported) | `make -C backend run` (WSL2 recommended) | Runs pure Go API without Wails; ideal for agents. |
 | Frontend dev server | `5173` (Vite default) | `npm --prefix frontend run dev -- --host --port 5173` | `--host` lets external clients reach it; choose another port if 5173 is busy. |
-| Live ingest HTTP server | `8077` (configurable via `LIVE_INGEST_PORT`) | Start the desktop app or call `internal/livehttp` bootstrapper | Requires `LIVE_INGEST_TOKEN` when exposed. Loopback binding still works with ngrok. |
+| Live ingest HTTP server | `17888` in the desktop app (`LIVE_INGEST_PORT` override supported) | Start the desktop app or call `internal/livehttp` bootstrapper | Requires `LIVE_INGEST_TOKEN` when exposed. The lower-level server falls back to `8077` only if constructed with an invalid port. |
 
 > **Windows vs WSL2:** Run ngrok from the environment that hosts each service. For backend/UI development this is usually WSL2 Ubuntu; the desktop ingest endpoint continues to run on Windows via Wails.
 
@@ -47,7 +47,7 @@ tunnels:
     host_header: rewrite  # fixes websocket/HMR host checks
 
   ingest:
-    addr: 8077            # Live ingest from desktop
+    addr: 17888           # Live ingest from desktop
     proto: http
     basic_auth:
       - "agent:<GENERATE_A_PASSWORD>"   # optional extra guard in addition to LIVE_INGEST_TOKEN

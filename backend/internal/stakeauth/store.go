@@ -13,12 +13,15 @@ import (
 // Account stores non-secret account metadata.
 // Secrets (api key, cf_clearance, user-agent) are stored in OS keychain.
 type Account struct {
-	ID        string `json:"id"`
-	Label     string `json:"label"`
-	Mirror    string `json:"mirror"`
-	Currency  string `json:"currency"`
-	CreatedAt string `json:"createdAt"`
-	UpdatedAt string `json:"updatedAt"`
+	ID              string `json:"id"`
+	Label           string `json:"label"`
+	Mirror          string `json:"mirror"`
+	Currency        string `json:"currency"`
+	ProfileID       string `json:"profileId"`
+	ConnectionState string `json:"connectionState"`
+	LastCheckAt     string `json:"lastCheckAt,omitempty"`
+	CreatedAt       string `json:"createdAt"`
+	UpdatedAt       string `json:"updatedAt"`
 }
 
 // Store persists account metadata in SQLite.
@@ -51,13 +54,22 @@ func (s *Store) Migrate() error {
 			label TEXT NOT NULL DEFAULT '',
 			mirror TEXT NOT NULL DEFAULT 'stake.com',
 			currency TEXT NOT NULL DEFAULT 'btc',
+			profile_id TEXT NOT NULL DEFAULT '',
+			connection_state TEXT NOT NULL DEFAULT 'not_configured',
+			last_check_at DATETIME NULL,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 		)`,
+		`ALTER TABLE stake_accounts ADD COLUMN profile_id TEXT NOT NULL DEFAULT ''`,
+		`ALTER TABLE stake_accounts ADD COLUMN connection_state TEXT NOT NULL DEFAULT 'not_configured'`,
+		`ALTER TABLE stake_accounts ADD COLUMN last_check_at DATETIME NULL`,
 		`CREATE INDEX IF NOT EXISTS idx_stake_accounts_updated_at ON stake_accounts(updated_at DESC)`,
 	}
 	for _, m := range migrations {
 		if _, err := s.db.Exec(m); err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "duplicate column name") {
+				continue
+			}
 			return fmt.Errorf("stakeauth: migrate: %w", err)
 		}
 	}
@@ -67,7 +79,7 @@ func (s *Store) Migrate() error {
 // List returns all accounts sorted by updated_at descending.
 func (s *Store) List() ([]Account, error) {
 	rows, err := s.db.Query(
-		`SELECT id, label, mirror, currency, created_at, updated_at
+		`SELECT id, label, mirror, currency, profile_id, connection_state, last_check_at, created_at, updated_at
 		 FROM stake_accounts
 		 ORDER BY updated_at DESC`,
 	)
@@ -80,8 +92,13 @@ func (s *Store) List() ([]Account, error) {
 	for rows.Next() {
 		var a Account
 		var createdAt, updatedAt time.Time
-		if err := rows.Scan(&a.ID, &a.Label, &a.Mirror, &a.Currency, &createdAt, &updatedAt); err != nil {
+		var lastCheckAt sql.NullTime
+		if err := rows.Scan(&a.ID, &a.Label, &a.Mirror, &a.Currency, &a.ProfileID, &a.ConnectionState, &lastCheckAt, &createdAt, &updatedAt); err != nil {
 			return nil, fmt.Errorf("stakeauth: scan account: %w", err)
+		}
+		normalizeAccountState(&a)
+		if lastCheckAt.Valid {
+			a.LastCheckAt = lastCheckAt.Time.Format(time.RFC3339)
 		}
 		a.CreatedAt = createdAt.Format(time.RFC3339)
 		a.UpdatedAt = updatedAt.Format(time.RFC3339)
@@ -102,17 +119,22 @@ func (s *Store) Get(id string) (*Account, error) {
 
 	var a Account
 	var createdAt, updatedAt time.Time
+	var lastCheckAt sql.NullTime
 	err := s.db.QueryRow(
-		`SELECT id, label, mirror, currency, created_at, updated_at
+		`SELECT id, label, mirror, currency, profile_id, connection_state, last_check_at, created_at, updated_at
 		 FROM stake_accounts
 		 WHERE id = ?`,
 		id,
-	).Scan(&a.ID, &a.Label, &a.Mirror, &a.Currency, &createdAt, &updatedAt)
+	).Scan(&a.ID, &a.Label, &a.Mirror, &a.Currency, &a.ProfileID, &a.ConnectionState, &lastCheckAt, &createdAt, &updatedAt)
 	if err == sql.ErrNoRows {
 		return nil, fmt.Errorf("stakeauth: account %q not found", id)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("stakeauth: get account: %w", err)
+	}
+	normalizeAccountState(&a)
+	if lastCheckAt.Valid {
+		a.LastCheckAt = lastCheckAt.Time.Format(time.RFC3339)
 	}
 	a.CreatedAt = createdAt.Format(time.RFC3339)
 	a.UpdatedAt = updatedAt.Format(time.RFC3339)
@@ -123,6 +145,13 @@ func (s *Store) Get(id string) (*Account, error) {
 func (s *Store) Save(acct Account) (Account, error) {
 	if strings.TrimSpace(acct.ID) == "" {
 		acct.ID = uuid.NewString()
+	} else if existing, err := s.Get(acct.ID); err == nil {
+		if strings.TrimSpace(acct.ProfileID) == "" {
+			acct.ProfileID = existing.ProfileID
+		}
+		if strings.TrimSpace(acct.ConnectionState) == "" {
+			acct.ConnectionState = existing.ConnectionState
+		}
 	}
 	if strings.TrimSpace(acct.Mirror) == "" {
 		acct.Mirror = "stake.com"
@@ -130,17 +159,25 @@ func (s *Store) Save(acct Account) (Account, error) {
 	if strings.TrimSpace(acct.Currency) == "" {
 		acct.Currency = "btc"
 	}
+	if strings.TrimSpace(acct.ProfileID) == "" {
+		acct.ProfileID = uuid.NewString()
+	}
+	if strings.TrimSpace(acct.ConnectionState) == "" {
+		acct.ConnectionState = StateNotConfigured
+	}
 	acct.Label = strings.TrimSpace(acct.Label)
 
 	_, err := s.db.Exec(
-		`INSERT INTO stake_accounts (id, label, mirror, currency)
-		 VALUES (?, ?, ?, ?)
+		`INSERT INTO stake_accounts (id, label, mirror, currency, profile_id, connection_state)
+		 VALUES (?, ?, ?, ?, ?, ?)
 		 ON CONFLICT(id) DO UPDATE SET
 		   label = excluded.label,
 		   mirror = excluded.mirror,
 		   currency = excluded.currency,
+		   profile_id = excluded.profile_id,
+		   connection_state = excluded.connection_state,
 		   updated_at = CURRENT_TIMESTAMP`,
-		acct.ID, acct.Label, acct.Mirror, acct.Currency,
+		acct.ID, acct.Label, acct.Mirror, acct.Currency, acct.ProfileID, acct.ConnectionState,
 	)
 	if err != nil {
 		return Account{}, fmt.Errorf("stakeauth: save account: %w", err)
@@ -151,6 +188,27 @@ func (s *Store) Save(acct Account) (Account, error) {
 		return Account{}, err
 	}
 	return *saved, nil
+}
+
+// UpdateConnectionState stores the latest account connection state and check time.
+func (s *Store) UpdateConnectionState(id, state string, checkedAt time.Time) error {
+	id = strings.TrimSpace(id)
+	if id == "" {
+		return fmt.Errorf("stakeauth: id is required")
+	}
+	if strings.TrimSpace(state) == "" {
+		state = StateDisconnected
+	}
+	_, err := s.db.Exec(
+		`UPDATE stake_accounts
+		 SET connection_state = ?, last_check_at = ?, updated_at = CURRENT_TIMESTAMP
+		 WHERE id = ?`,
+		state, checkedAt.UTC(), id,
+	)
+	if err != nil {
+		return fmt.Errorf("stakeauth: update connection state: %w", err)
+	}
+	return nil
 }
 
 // Delete removes account metadata.
@@ -164,4 +222,13 @@ func (s *Store) Delete(id string) error {
 		return fmt.Errorf("stakeauth: delete account: %w", err)
 	}
 	return nil
+}
+
+func normalizeAccountState(a *Account) {
+	if strings.TrimSpace(a.ProfileID) == "" {
+		a.ProfileID = a.ID
+	}
+	if strings.TrimSpace(a.ConnectionState) == "" {
+		a.ConnectionState = StateNotConfigured
+	}
 }

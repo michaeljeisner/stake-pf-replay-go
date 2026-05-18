@@ -1,6 +1,3 @@
-const DEFAULT_TIMEOUT = 5000;
-const POLL_INTERVAL = 50;
-
 type BindingPath = string[];
 
 type WaitOptions = {
@@ -8,38 +5,11 @@ type WaitOptions = {
   intervalMs?: number;
 };
 
-function hasBinding(path: BindingPath): boolean {
-  let current: any = window as any;
-  for (const segment of path) {
-    if (current && segment in current) {
-      current = current[segment];
-    } else {
-      return false;
-    }
-  }
-  return typeof current !== 'undefined';
-}
-
 export async function waitForWailsBinding<T = unknown>(
-  path: BindingPath,
-  options: WaitOptions = {},
+  _path: BindingPath,
+  _options: WaitOptions = {},
 ): Promise<T> {
-  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT;
-  const intervalMs = options.intervalMs ?? POLL_INTERVAL;
-  const deadline = Date.now() + timeoutMs;
-
-  while (Date.now() < deadline) {
-    if (hasBinding(path)) {
-      let current: any = window as any;
-      for (const segment of path) {
-        current = current[segment];
-      }
-      return current as T;
-    }
-    await new Promise((resolve) => setTimeout(resolve, intervalMs));
-  }
-
-  throw new Error(`Wails binding not ready: ${path.join('.')}`);
+  return undefined as T;
 }
 
 export async function callWhenReady<T>(

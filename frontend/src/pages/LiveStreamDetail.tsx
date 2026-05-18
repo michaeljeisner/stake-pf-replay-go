@@ -19,7 +19,7 @@ import {
   IconLayoutDashboard,
   IconTableOptions,
 } from '@tabler/icons-react';
-import { DeleteStream, ExportCSV } from '@wails/go/livehttp/LiveModule';
+import { DeleteStream, ExportCSV } from '@desktop-bindings/internal/livehttp/livemodule';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from '@/components/ui/use-toast';

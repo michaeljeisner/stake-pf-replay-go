@@ -10,24 +10,15 @@ import (
 	"os"
 	"path/filepath"
 	"runtime"
-	"sync"
 
-	"github.com/wailsapp/wails/v2"
-	"github.com/wailsapp/wails/v2/pkg/logger"
-	"github.com/wailsapp/wails/v2/pkg/menu"
-	"github.com/wailsapp/wails/v2/pkg/menu/keys"
-	"github.com/wailsapp/wails/v2/pkg/options"
-	"github.com/wailsapp/wails/v2/pkg/options/assetserver"
-	"github.com/wailsapp/wails/v2/pkg/options/linux"
-	"github.com/wailsapp/wails/v2/pkg/options/mac"
-	"github.com/wailsapp/wails/v2/pkg/options/windows"
-	wruntime "github.com/wailsapp/wails/v2/pkg/runtime"
+	"github.com/wailsapp/wails/v3/pkg/application"
 
 	// Existing bindings (backend module)
 	"github.com/MJE43/stake-pf-replay-go/bindings"
 
 	// Live-ingest module (this repo, root module)
 	"github.com/MJE43/stake-pf-replay-go-desktop/internal/livehttp"
+	"github.com/MJE43/stake-pf-replay-go-desktop/internal/livestore"
 )
 
 //go:embed all:frontend/dist
@@ -41,251 +32,114 @@ const (
 	repoURL             = "https://github.com/MJE43/stake-pf-replay-go"
 )
 
-var (
-	appCtx   context.Context
-	appCtxMu sync.RWMutex
-)
-
-// buildWindowsOptions configures Windows-specific application settings
-func buildWindowsOptions() *windows.Options {
-	return &windows.Options{
-		// Modern Windows 11 Mica backdrop effect
-		BackdropType: windows.Mica,
-
-		// Theme Settings
-		Theme: windows.SystemDefault,
-
-		// Custom theme colors for light/dark mode - monochrome palette
-		CustomTheme: &windows.ThemeSettings{
-			// Dark mode (deep black)
-			DarkModeTitleBar:  windows.RGB(10, 10, 10),
-			DarkModeTitleText: windows.RGB(250, 250, 250),
-			DarkModeBorder:    windows.RGB(46, 46, 46),
-
-			// Light mode
-			LightModeTitleBar:  windows.RGB(250, 250, 250),
-			LightModeTitleText: windows.RGB(23, 23, 23),
-			LightModeBorder:    windows.RGB(217, 217, 217),
-		},
-
-		// WebView Configuration
-		WebviewIsTransparent: false,
-		WindowIsTranslucent:  false,
-
-		// DPI and Zoom
-		DisablePinchZoom:     false,
-		IsZoomControlEnabled: false,
-		ZoomFactor:           1.0,
-
-		// Window Decorations
-		DisableWindowIcon:                 false,
-		DisableFramelessWindowDecorations: false,
-
-		// Window Class Name
-		WindowClassName: "WENWindow",
-
-		// Power Management Callbacks
-		OnSuspend: func() {
-			log.Println("Windows entering low power mode")
-		},
-		OnResume: func() {
-			log.Println("Windows resuming from low power mode")
-		},
-	}
-}
-
-// buildMacOptions configures macOS-specific application settings
-func buildMacOptions() *mac.Options {
-	// Load icon for About dialog
-	iconData, err := assets.ReadFile("frontend/dist/assets/logo.png")
-	var aboutIcon []byte
-	if err == nil {
-		aboutIcon = iconData
-	}
-
-	return &mac.Options{
-		// Title Bar Configuration
-		TitleBar: &mac.TitleBar{
-			TitlebarAppearsTransparent: false,
-			HideTitle:                  false,
-			HideTitleBar:               false,
-			FullSizeContent:            false,
-			UseToolbar:                 false,
-			HideToolbarSeparator:       true,
-		},
-
-		// Appearance - Follow system theme
-		WebviewIsTransparent: false,
-		WindowIsTranslucent:  false,
-
-		// About Dialog
-		About: &mac.AboutInfo{
-			Title: "WEN?",
-			Message: "A privacy-focused desktop application for analyzing provable fairness.\n\n" +
-				"© 2024-2025 Michael Eisner\n" +
-				"Built with Wails\n\n" +
-				"This application processes all data locally and never transmits server seeds over the network.",
-			Icon: aboutIcon,
-		},
-	}
-}
-
-// buildLinuxOptions configures Linux-specific application settings
-func buildLinuxOptions() *linux.Options {
-	// Load icon for window manager
-	iconData, err := assets.ReadFile("frontend/dist/assets/logo.png")
-	var windowIcon []byte
-	if err == nil {
-		windowIcon = iconData
-	}
-
-	return &linux.Options{
-		// Window Icon
-		Icon: windowIcon,
-
-		// WebView Configuration
-		WindowIsTranslucent: false,
-		WebviewGpuPolicy:    linux.WebviewGpuPolicyAlways,
-
-		// Program Name for window managers
-		ProgramName: "wen",
-	}
-}
-
 func main() {
 	log.Printf("Starting WEN? (Go %s)...", runtime.Version())
+	dataDir := ensureAppDataDir()
 
-	// Existing backend bindings object
-	app := bindings.New()
+	appSvc := bindings.New()
 
-	// Stake account/auth module (multi-account + keyring + connection checks)
-	authDBPath := filepath.Join(appDataDir(), "auth.db")
-	authMod, err := bindings.NewAuthModule(authDBPath, bindings.DefaultFallbackSecretsPath(appDataDir()))
+	authDBPath := filepath.Join(dataDir, "auth.db")
+	authMod, err := bindings.NewAuthModule(authDBPath, bindings.DefaultFallbackSecretsPath(dataDir))
 	if err != nil {
 		log.Fatalf("auth module init failed: %v", err)
 	}
 
-	// Scripting engine module
-	scriptMod := bindings.NewScriptModule(authMod)
-
-	// Live ingest module wiring
 	dbPath := defaultLiveDBPath()
 	port := envInt("LIVE_INGEST_PORT", 17888)
-	token := os.Getenv("LIVE_INGEST_TOKEN") // optional; when empty, no auth
+	token := os.Getenv("LIVE_INGEST_TOKEN")
 	liveMod, err := livehttp.NewLiveModule(dbPath, port, token)
 	if err != nil {
 		log.Fatalf("live module init failed: %v", err)
 	}
+	scriptMod := bindings.NewScriptModuleWithLedger(authMod, liveLedgerRecorder{mod: liveMod})
 
-	// Initialize script session store
-	scriptDBPath := filepath.Join(appDataDir(), "script_sessions.db")
+	scriptDBPath := filepath.Join(dataDir, "script_sessions.db")
 	if err := scriptMod.InitStore(scriptDBPath); err != nil {
 		log.Printf("script store init failed (continuing without persistence): %v", err)
 	}
 
-	startup := func(ctx context.Context) {
-		// Start existing app
-		app.Startup(ctx)
-		authMod.Startup(ctx)
-		scriptMod.Startup(ctx)
-		setAppContext(ctx)
-
-		// Start local HTTP ingest server
-		if err := liveMod.Startup(ctx); err != nil {
-			log.Printf("live ingest server failed to start: %v", err)
-		} else {
-			info := liveMod.IngestInfo()
-			log.Printf("Live ingest ready at %s (token enabled: %v)", info.URL, info.TokenEnabled)
-		}
-	}
-
-	beforeClose := func(ctx context.Context) (prevent bool) {
-		// Graceful shutdown of live module
-		if err := liveMod.Shutdown(ctx); err != nil {
-			log.Printf("live module shutdown error: %v", err)
-		}
-		if err := authMod.Shutdown(); err != nil {
-			log.Printf("auth module shutdown error: %v", err)
-		}
-		clearAppContext()
-		log.Println("Application is closing")
-		return false
-	}
-
-	if err := wails.Run(&options.App{
-		// Window Configuration
-		Title:            "WEN?",
-		Width:            1280,
-		Height:           800,
-		MinWidth:         1024,
-		MinHeight:        768,
-		MaxWidth:         2560,
-		MaxHeight:        1440,
-		WindowStartState: options.Normal,
-		Frameless:        false,
-		DisableResize:    false,
-		Fullscreen:       false,
-		StartHidden:      false,
-		HideWindowOnClose: false,
-		AlwaysOnTop:      false,
-		BackgroundColour: &options.RGBA{R: 10, G: 10, B: 10, A: 255},
-
-		// Asset Server
-		AssetServer: &assetserver.Options{
-			Assets: assets,
+	icon := readAsset("frontend/dist/assets/logo.png")
+	app := application.New(application.Options{
+		Name:        "WEN?",
+		Description: "A privacy-focused desktop application for analyzing provable fairness.",
+		Icon:        icon,
+		Services: []application.Service{
+			application.NewService(appSvc),
+			application.NewService(liveMod),
+			application.NewService(scriptMod),
+			application.NewService(authMod),
 		},
-
-		// Application Lifecycle
-		OnStartup:     startup,
-		OnBeforeClose: beforeClose,
-		OnDomReady: func(ctx context.Context) {
-			log.Println("DOM is ready")
+		Assets: application.AssetOptions{
+			Handler: application.AssetFileServerFS(assets),
 		},
-		OnShutdown: func(ctx context.Context) {
-			log.Println("Application shutdown complete")
+		Windows: application.WindowsOptions{
+			WndClass:              "WENWindow",
+			WebviewUserDataPath:   filepath.Join(dataDir, "webview"),
+			DisabledFeatures:      []string{"AutofillServerCommunication"},
+			AdditionalBrowserArgs: []string{"--disable-features=msWebOOUI,msPdfOOUI"},
 		},
-
-		// Menu
-		Menu: buildAppMenu(),
-
-		// Bindings
-		Bind: []interface{}{app, liveMod, scriptMod, authMod},
-
-		// Logging
-		LogLevel:           logger.INFO,
-		LogLevelProduction: logger.ERROR,
-
-		// User Experience
-		EnableDefaultContextMenu:         false,
-		EnableFraudulentWebsiteDetection: false,
-
-		// Error Handling
-		ErrorFormatter: func(err error) any {
-			if err == nil {
-				return nil
-			}
-			return err.Error()
+		Mac: application.MacOptions{
+			ApplicationShouldTerminateAfterLastWindowClosed: true,
 		},
-
-		// Single Instance Lock - prevents multiple app instances
-		SingleInstanceLock: &options.SingleInstanceLock{
-			UniqueId: "c9f3d4e5-8a2b-4c6d-9e1f-wen-desktop",
-			OnSecondInstanceLaunch: func(data options.SecondInstanceData) {
+		Linux: application.LinuxOptions{
+			ProgramName: "wen",
+		},
+		SingleInstance: &application.SingleInstanceOptions{
+			UniqueID: "c9f3d4e5-8a2b-4c6d-9e1f-wen-desktop",
+			OnSecondInstanceLaunch: func(data application.SecondInstanceData) {
 				log.Printf("Second instance launch prevented. Args: %v", data.Args)
 			},
 		},
-
-		// Drag and Drop Configuration
-		DragAndDrop: &options.DragAndDrop{
-			EnableFileDrop:     false, // Disable for security - app doesn't need file drops
-			DisableWebViewDrop: true,
+		MarshalError: func(err error) []byte {
+			if err == nil {
+				return nil
+			}
+			return []byte(fmt.Sprintf("%q", err.Error()))
 		},
+		ShouldQuit: func() bool {
+			log.Println("Application is closing")
+			return true
+		},
+		OnShutdown: func() {
+			log.Println("Application shutdown complete")
+		},
+		ErrorHandler: func(err error) {
+			if err != nil {
+				log.Printf("Wails application error: %v", err)
+			}
+		},
+	})
 
-		// Platform-Specific Options
-		Windows: buildWindowsOptions(),
-		Mac:     buildMacOptions(),
-		Linux:   buildLinuxOptions(),
-	}); err != nil {
+	authMod.SetApplication(app)
+	liveMod.SetApplication(app)
+
+	app.Menu.Set(buildAppMenu(app))
+
+	app.Window.NewWithOptions(application.WebviewWindowOptions{
+		Title:                      "WEN?",
+		Width:                      1280,
+		Height:                     800,
+		MinWidth:                   1024,
+		MinHeight:                  768,
+		MaxWidth:                   2560,
+		MaxHeight:                  1440,
+		StartState:                 application.WindowStateNormal,
+		Frameless:                  false,
+		DisableResize:              false,
+		AlwaysOnTop:                false,
+		BackgroundColour:           application.NewRGBA(10, 10, 10, 255),
+		URL:                        "/",
+		Zoom:                       1.0,
+		ZoomControlEnabled:         false,
+		EnableFileDrop:             false,
+		DefaultContextMenuDisabled: true,
+		UseApplicationMenu:         true,
+		Windows:                    buildWindowsWindowOptions(),
+		Mac:                        buildMacWindowOptions(),
+		Linux:                      buildLinuxWindowOptions(),
+	})
+
+	if err := app.Run(); err != nil {
 		log.Printf("Error running Wails app: %v", err)
 		fmt.Printf("Error: %v\n", err)
 		panic(err)
@@ -294,17 +148,108 @@ func main() {
 	log.Println("Application exited normally")
 }
 
-func defaultLiveDBPath() string {
-	base := appDataDir()
-	if err := os.MkdirAll(base, 0o755); err != nil {
-		log.Printf("appdata mkdir failed: %v; using fallback", err)
-		if legacy := legacyLiveDBPath(); legacy != "" {
-			log.Printf("continuing to use legacy live ingest DB at %s", legacy)
-			return legacy
-		}
-		return filepath.Join(".", liveIngestDBName)
-	}
+type liveLedgerRecorder struct {
+	mod *livehttp.LiveModule
+}
 
+func (r liveLedgerRecorder) RecordLedgerEntry(_ context.Context, entry bindings.LedgerEntry) error {
+	if r.mod == nil {
+		return nil
+	}
+	_, err := r.mod.RecordLedgerEntry(livestore.LedgerEntry{
+		AccountID:        entry.AccountID,
+		Source:           entry.Source,
+		Game:             entry.Game,
+		ExternalBetID:    entry.ExternalBetID,
+		IdempotencyKey:   entry.IdempotencyKey,
+		Currency:         entry.Currency,
+		Nonce:            entry.Nonce,
+		Amount:           entry.Amount,
+		Payout:           entry.Payout,
+		PayoutMultiplier: entry.PayoutMultiplier,
+		RequestJSON:      entry.RequestJSON,
+		ResponseJSON:     entry.ResponseJSON,
+		CreatedAt:        entry.CreatedAt,
+	})
+	return err
+}
+
+func buildWindowsWindowOptions() application.WindowsWindow {
+	return application.WindowsWindow{
+		BackdropType:                      application.Mica,
+		Theme:                             application.SystemDefault,
+		DisableIcon:                       false,
+		DisableFramelessWindowDecorations: false,
+		GeneralAutofillEnabled:            false,
+		PasswordAutosaveEnabled:           false,
+		CustomTheme:                       buildWindowsThemeSettings(),
+		ResizeDebounceMS:                  0,
+		WindowDidMoveDebounceMS:           0,
+		Permissions:                       nil,
+		Menu:                              nil,
+	}
+}
+
+func buildWindowsThemeSettings() application.ThemeSettings {
+	darkTitle := application.NewRGBPtr(10, 10, 10)
+	darkText := application.NewRGBPtr(250, 250, 250)
+	darkBorder := application.NewRGBPtr(46, 46, 46)
+	lightTitle := application.NewRGBPtr(250, 250, 250)
+	lightText := application.NewRGBPtr(23, 23, 23)
+	lightBorder := application.NewRGBPtr(217, 217, 217)
+
+	return application.ThemeSettings{
+		DarkModeActive: &application.WindowTheme{
+			TitleBarColour:  darkTitle,
+			TitleTextColour: darkText,
+			BorderColour:    darkBorder,
+		},
+		DarkModeInactive: &application.WindowTheme{
+			TitleBarColour:  darkTitle,
+			TitleTextColour: darkText,
+			BorderColour:    darkBorder,
+		},
+		LightModeActive: &application.WindowTheme{
+			TitleBarColour:  lightTitle,
+			TitleTextColour: lightText,
+			BorderColour:    lightBorder,
+		},
+		LightModeInactive: &application.WindowTheme{
+			TitleBarColour:  lightTitle,
+			TitleTextColour: lightText,
+			BorderColour:    lightBorder,
+		},
+	}
+}
+
+func buildMacWindowOptions() application.MacWindow {
+	return application.MacWindow{
+		Backdrop: application.MacBackdropNormal,
+		TitleBar: application.MacTitleBar{
+			AppearsTransparent:   false,
+			Hide:                 false,
+			HideTitle:            false,
+			FullSizeContent:      false,
+			UseToolbar:           false,
+			HideToolbarSeparator: true,
+		},
+	}
+}
+
+func buildLinuxWindowOptions() application.LinuxWindow {
+	return application.LinuxWindow{}
+}
+
+func readAsset(path string) []byte {
+	data, err := assets.ReadFile(path)
+	if err != nil {
+		return nil
+	}
+	return data
+}
+
+func defaultLiveDBPath() string {
+	base := ensureAppDataDir()
 	target := filepath.Join(base, liveIngestDBName)
 
 	if _, err := os.Stat(target); errors.Is(err, os.ErrNotExist) {
@@ -318,6 +263,15 @@ func defaultLiveDBPath() string {
 	}
 
 	return target
+}
+
+func ensureAppDataDir() string {
+	base := appDataDir()
+	if err := os.MkdirAll(base, 0o755); err != nil {
+		log.Printf("appdata mkdir failed for %s: %v; using local fallback", base, err)
+		return "."
+	}
+	return base
 }
 
 // appDataDir returns an OS-appropriate writable directory.
@@ -374,59 +328,58 @@ func envInt(k string, def int) int {
 	return def
 }
 
-func buildAppMenu() *menu.Menu {
-	rootMenu := menu.NewMenu()
+func buildAppMenu(app *application.App) *application.Menu {
+	rootMenu := app.NewMenu()
 
 	if runtime.GOOS == "darwin" {
-		if appMenu := menu.AppMenu(); appMenu != nil {
-			rootMenu.Append(appMenu)
-		}
+		rootMenu.AddRole(application.AppMenu)
 	}
 
-	fileMenu := menu.NewMenu()
-	fileMenu.AddText("Open Data Directory", keys.CmdOrCtrl("o"), func(_ *menu.CallbackData) {
-		withAppContext(func(ctx context.Context) {
-			openPathInExplorer(ctx, appDataDir())
+	fileMenu := rootMenu.AddSubmenu("File")
+	fileMenu.Add("Open Data Directory").
+		SetAccelerator("CmdOrCtrl+O").
+		OnClick(func(_ *application.Context) {
+			openPathInExplorer(app, appDataDir())
 		})
-	})
 	fileMenu.AddSeparator()
-	fileMenu.AddText("Quit", keys.CmdOrCtrl("q"), func(_ *menu.CallbackData) {
-		withAppContext(func(ctx context.Context) {
-			wruntime.Quit(ctx)
+	fileMenu.Add("Quit").
+		SetAccelerator("CmdOrCtrl+Q").
+		OnClick(func(_ *application.Context) {
+			app.Quit()
 		})
-	})
-	rootMenu.Append(menu.SubMenu("File", fileMenu))
 
-	viewMenu := menu.NewMenu()
-	viewMenu.AddText("Reload Frontend", keys.CmdOrCtrl("r"), func(_ *menu.CallbackData) {
-		withAppContext(func(ctx context.Context) {
-			wruntime.WindowReloadApp(ctx)
+	viewMenu := rootMenu.AddSubmenu("View")
+	viewMenu.Add("Reload Frontend").
+		SetAccelerator("CmdOrCtrl+R").
+		OnClick(func(_ *application.Context) {
+			if window := app.Window.Current(); window != nil {
+				window.ForceReload()
+			}
 		})
-	})
-	viewMenu.AddText("Toggle Fullscreen", keys.Combo("f", keys.CmdOrCtrlKey, keys.ShiftKey), func(_ *menu.CallbackData) {
-		withAppContext(func(ctx context.Context) {
-			toggleFullscreen(ctx)
+	viewMenu.Add("Toggle Fullscreen").
+		SetAccelerator("CmdOrCtrl+Shift+F").
+		OnClick(func(_ *application.Context) {
+			if window := app.Window.Current(); window != nil {
+				window.ToggleFullscreen()
+			}
 		})
-	})
-	rootMenu.Append(menu.SubMenu("View", viewMenu))
 
-	helpMenu := menu.NewMenu()
-	helpMenu.AddText("Documentation", nil, func(_ *menu.CallbackData) {
-		withAppContext(func(ctx context.Context) {
-			wruntime.BrowserOpenURL(ctx, docsURL)
-		})
+	helpMenu := rootMenu.AddSubmenu("Help")
+	helpMenu.Add("Documentation").OnClick(func(_ *application.Context) {
+		if err := app.Browser.OpenURL(docsURL); err != nil {
+			log.Printf("open documentation failed: %v", err)
+		}
 	})
-	helpMenu.AddText("Project Repository", nil, func(_ *menu.CallbackData) {
-		withAppContext(func(ctx context.Context) {
-			wruntime.BrowserOpenURL(ctx, repoURL)
-		})
+	helpMenu.Add("Project Repository").OnClick(func(_ *application.Context) {
+		if err := app.Browser.OpenURL(repoURL); err != nil {
+			log.Printf("open repository failed: %v", err)
+		}
 	})
-	rootMenu.Append(menu.SubMenu("Help", helpMenu))
 
 	return rootMenu
 }
 
-func openPathInExplorer(ctx context.Context, path string) {
+func openPathInExplorer(app *application.App, path string) {
 	if path == "" {
 		return
 	}
@@ -437,7 +390,9 @@ func openPathInExplorer(ctx context.Context, path string) {
 		abs = path
 	}
 
-	wruntime.BrowserOpenURL(ctx, fileURI(abs))
+	if err := app.Browser.OpenURL(fileURI(abs)); err != nil {
+		log.Printf("open data directory failed: %v", err)
+	}
 }
 
 func fileURI(path string) string {
@@ -449,39 +404,3 @@ func fileURI(path string) string {
 	u := url.URL{Scheme: "file", Path: clean}
 	return u.String()
 }
-
-func toggleFullscreen(ctx context.Context) {
-	if wruntime.WindowIsFullscreen(ctx) {
-		wruntime.WindowUnfullscreen(ctx)
-		return
-	}
-	wruntime.WindowFullscreen(ctx)
-}
-
-func setAppContext(ctx context.Context) {
-	appCtxMu.Lock()
-	defer appCtxMu.Unlock()
-	appCtx = ctx
-}
-
-func clearAppContext() {
-	appCtxMu.Lock()
-	defer appCtxMu.Unlock()
-	appCtx = nil
-}
-
-func withAppContext(action func(context.Context)) {
-	appCtxMu.RLock()
-	ctx := appCtx
-	appCtxMu.RUnlock()
-	if ctx == nil {
-		log.Println("application context not initialised; ignoring menu action")
-		return
-	}
-	action(ctx)
-}
-
-// Notes:
-//
-// * The `Bind` list now includes `liveMod`, so the frontend can call its methods directly. This matches how Wails bindings work in your repo’s current `main.go`, with minimal changes.&#x20;
-// * Ensure the import path for the live module matches your root module name (`github.com/MJE43/stake-pf-replay-go-desktop`). If your module name differs, adjust the import.

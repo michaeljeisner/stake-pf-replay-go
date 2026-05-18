@@ -156,7 +156,7 @@ REST API endpoints for core casino games:
 **Use this for**: Basic game betting implementation
 
 #### 3. [Extended Game Endpoints](./extended-game-endpoints.md)
-Note: This file was not found in the expected location. Additional games may be documented in the main game endpoints file or require separate extraction from the source code.
+Placeholder for additional game endpoint extraction.
 
 Expected coverage:
 - Plinko
@@ -292,7 +292,7 @@ Suggested order for implementing Stake API features in Go:
 **Files to reference**:
 - [Game Endpoints](./game-endpoints.md#keno)
 - [Game Endpoints](./game-endpoints.md#baccarat)
-- [Extended Game Endpoints](./extended-game-endpoints.md) (if available)
+- [Extended Game Endpoints](./extended-game-endpoints.md)
 
 **Success criteria**: Successfully bet on all documented games
 

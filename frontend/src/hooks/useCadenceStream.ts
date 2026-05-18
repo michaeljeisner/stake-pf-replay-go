@@ -7,8 +7,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { EventsOn } from '@wails/runtime/runtime';
-import { GetStreamWithRounds, GetRecentRounds, GetBetsPage, TailRounds } from '@wails/go/livehttp/LiveModule';
+import { EventsOn } from '@/lib/wails-events';
+import { GetStreamWithRounds, GetRecentRounds, GetBetsPage, TailRounds } from '@desktop-bindings/internal/livehttp/livemodule';
 import { callWithRetry, waitForWailsBinding } from '@/lib/wails';
 import {
   computeAllTierStats,

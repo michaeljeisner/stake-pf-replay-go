@@ -8,6 +8,7 @@
 |----------|---------|----------|
 | [AGENTS.md](./AGENTS.md) | Development guidelines, build commands, coding standards | Developers, AI Agents |
 | [PRD.md](./PRD.md) | Product requirements and specifications | Product, Engineering |
+| [ROADMAP.md](./ROADMAP.md) | Consolidated forward plan for replay, live dashboard, Stake connector, and bot studio work | Product, Engineering |
 | [design-constraints.md](./design-constraints.md) | **CANONICAL** backend constraints (CI-enforced) | Engineering, Frontend |
 | [api/README.md](./api/README.md) | Stake API documentation master index | Engineering |
 
@@ -28,6 +29,7 @@
 | File | Description |
 |------|-------------|
 | **[PRD.md](./PRD.md)** | Product Requirements Document. High-level overview, user stories, non-functional requirements, API specifications, game verification, scanning performance targets, and milestones. |
+| **[ROADMAP.md](./ROADMAP.md)** | Consolidated forward plan. Summarizes current replay work, live Pump dashboard requirements, Stake connector/productization phases, authentication approach, and scripting direction. |
 | **[stakeDocs.md](./stakeDocs.md)** | Stake.com provably fair specification. RNG implementation details, server/client seeds, nonce handling, bytes-to-floats conversion, game event translation, and Fisher-Yates shuffle algorithm. **Foundational reference for backend game implementations.** |
 
 ### Design Constraints (CI-Enforced)
@@ -63,6 +65,7 @@ Comprehensive reverse-engineered documentation of the Stake.com casino API, extr
 | **[api/README.md](./api/README.md)** | Master index and implementation roadmap. Quick reference table of all endpoints, architecture overview (GraphQL vs REST), key insights, and development phases. |
 | **[api/graphql-operations.md](./api/graphql-operations.md)** | GraphQL operations for account management. `RotateSeedPair`, `CreateVaultDeposit`, `UserBalances` with full query strings and response structures. |
 | **[api/game-endpoints.md](./api/game-endpoints.md)** | REST API endpoints for casino games. Dice, Limbo, HiLo, Mines, Keno, Baccarat, Blackjack with request/response TypeScript interfaces. |
+| **[api/extended-game-endpoints.md](./api/extended-game-endpoints.md)** | Placeholder for endpoint docs that were referenced but not yet extracted: Plinko, Wheel, Roulette, Dragon Tower, Video Poker, Blue Samurai, and related games. |
 | **[api/authentication-and-utilities.md](./api/authentication-and-utilities.md)** | Authentication mechanisms, session management, error handling patterns, retry logic, and utility functions. |
 
 ---
@@ -86,6 +89,7 @@ AGENTS.md (Developer Guidelines)
     └── ngrok.md (Tunneling procedures)
 
 PRD.md (Product Requirements)
+    └── ROADMAP.md (Consolidated forward plan)
     └── stakeDocs.md (Platform specification)
     └── live-dashboard-strategy-spec.md (Feature spec)
         └── antebot-script.js (Implementation example)
@@ -97,17 +101,23 @@ design-constraints.md (CANONICAL CONSTRAINTS)
 api/README.md (Stake API Index)
     ├── api/graphql-operations.md
     ├── api/game-endpoints.md
+    ├── api/extended-game-endpoints.md
     └── api/authentication-and-utilities.md
 
 scripting/scripting-model.md
     └── scripting/statistics-and-state.md
+
+archive/README.md
+    └── archive/cursor_gambling_project_productization.md (source transcript summarized in ROADMAP.md)
 ```
 
 ---
 
 ## Maintenance Notes
 
-### Recently Added (Dec 2024)
+### Recently Added / Organized
+- `ROADMAP.md` - Consolidated forward plan from PRD, live dashboard spec, API docs, scripting docs, and archived productization notes
+- `archive/*` - Long exploratory material moved out of the active docs surface
 - `api/*` - Stake API documentation from bot2love analysis
 - `scripting/*` - Scripting engine specifications
 
@@ -122,4 +132,4 @@ scripting/scripting-model.md
 
 ---
 
-*Last updated: December 2024*
+*Last updated: May 2026*

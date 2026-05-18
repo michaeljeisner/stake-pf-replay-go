@@ -20,7 +20,16 @@ Comprehensive documentation of REST API endpoints for Stake casino games, extrac
 
 ## Authentication
 
-All API requests require authentication via the `x-access-token` header.
+All API requests require authentication via the `x-access-token` header, but the product must not assume a detached Go HTTP client can satisfy Stake/Cloudflare on its own. Betting calls should execute only after the account connector reports `connected`.
+
+The supported desktop request path is:
+
+1. User selects a Stake account.
+2. The account connector verifies mirror reachability, browser session health, and account credentials.
+3. The typed game client sends requests through the connected browser-profile transport.
+4. Results are persisted to the ledger before the UI or bot engine treats the bet as complete.
+
+Direct Go HTTP with copied cookies/headers is a fallback transport, not the primary product plan.
 
 ### Headers
 
@@ -114,14 +123,14 @@ interface ErrorResponse {
 ### Error Handling Pattern
 
 ```typescript
-// HTTP Status Code 403 triggers game retry
-// Other errors retry after 2 second delay
 if (response.status === 403) {
-  // Re-authenticate and retry
+  // Stop the betting session and ask the account connector to repair/check the browser session.
 } else {
-  // Retry after 2000ms
+  // Retry only if the error is classified as transient and the user/session is still running.
 }
 ```
+
+`401` and `403` must be classified by the account connector before retrying. A Cloudflare challenge, expired browser session, or invalid credential should move the account to a repair state and stop automated betting.
 
 ---
 
@@ -1320,8 +1329,9 @@ All endpoints use **POST** method, even for retrieving active bets.
 
 - Default retry delay: **1000ms**
 - Dice and Limbo retry delay: **2000ms**
-- On HTTP 403: Special retry logic with game state recovery
+- On HTTP 401/403: Stop betting and run account/session repair unless the connector explicitly classifies the response as transient
 - On other errors: Automatic retry if bot is still running
+- All betting requests must be serialized per account; never run parallel casino actions for the same account/session
 
 ## Identifier Generation
 
@@ -1351,6 +1361,8 @@ While variables like `crash_bet_placed` and `crash_game_ran` exist in the codeba
 - **HiLo, Mines, Blackjack**: Support multi-round gameplay with active state
 - **Dice, Limbo, Keno, Baccarat**: Single-round games that complete immediately
 - Active games can be recovered using `/_api/casino/active-bet/{game}` endpoints
+- Before automated sessions start, active-state games must run recovery checks so a stale active game is resumed, cashed out, or explicitly abandoned by the user.
+- Dice and Limbo should be the first productized betting endpoints because they complete in one request and prove the account connector, request bridge, and ledger path with the smallest state surface.
 
 ### Win/Loss Detection
 

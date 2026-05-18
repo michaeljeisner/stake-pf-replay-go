@@ -18,8 +18,9 @@ import {
   IconSettings,
   IconTarget,
 } from '@tabler/icons-react';
-import { StartScan, GetGames } from '@wails/go/bindings/App';
-import { bindings, store } from '@wails/go/models';
+import { StartScan, GetGames } from '@bindings/bindings/app';
+import * as bindings from '@bindings/bindings';
+import * as store from '@bindings/internal/store';
 import { scanFormSchema, validateGameParams } from '@/lib/validation';
 import { callWithRetry, waitForWailsBinding } from '@/lib/wails';
 import { Button } from '@/components/ui/button';
