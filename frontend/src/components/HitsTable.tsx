@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { IconAlertTriangle, IconTable, IconDownload } from '@tabler/icons-react';
-import { GetRunHits, ExportRunCSV } from '@wails/go/bindings/App';
-import { store } from '@wails/go/models';
+import { GetRunHits, ExportRunCSV } from '@bindings/bindings/app';
+import * as store from '@bindings/internal/store';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
 import { callWithRetry, waitForWailsBinding } from '@/lib/wails';

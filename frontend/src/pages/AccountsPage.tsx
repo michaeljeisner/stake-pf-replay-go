@@ -10,10 +10,25 @@ import {
   IconPlugOff,
   IconPlus,
   IconTrash,
+  IconUpload,
 } from '@tabler/icons-react';
 import { Button } from '@/components/ui/button';
 import { toast } from '@/components/ui/use-toast';
 import { cn } from '@/lib/utils';
+import {
+  Connect,
+  ConnectionCheck,
+  DeleteAccount,
+  Disconnect,
+  GetActiveStatus,
+  GetSecretsMasked,
+  ListAccounts,
+  OpenCasinoInBrowser,
+  RepairSession,
+  SaveAccount,
+  SetSecrets,
+} from '@bindings/bindings/authmodule';
+import { GetLedgerSummary, ListLedgerEntries, SyncHistoryEntries } from '@desktop-bindings/internal/livehttp/livemodule';
 
 type Account = {
   id: string;
@@ -40,6 +55,41 @@ type ActiveStatus = {
 type StepResult = { name: string; success: boolean; message?: string };
 type ConnectionCheckResult = { ok: boolean; state: string; reason?: { code?: string; message?: string }; lastCheckAt?: string; steps: StepResult[] };
 type SecretsMasked = { hasApiKey: boolean; hasClearance: boolean; hasUserAgent: boolean };
+type LedgerEntry = {
+  id: number;
+  account_id: string;
+  source: string;
+  game: string;
+  external_bet_id?: string;
+  idempotency_key: string;
+  currency: string;
+  nonce: number;
+  amount: number;
+  payout: number;
+  payout_multiplier: number;
+  response_json?: string;
+  created_at: string;
+};
+type LedgerGameSummary = {
+  game: string;
+  source: string;
+  count: number;
+  wagered: number;
+  payout: number;
+  profit: number;
+  win_count: number;
+  last_nonce: number;
+};
+type LedgerSummary = {
+  account_id: string;
+  count: number;
+  wagered: number;
+  payout: number;
+  profit: number;
+  roi: number;
+  win_count: number;
+  by_game: LedgerGameSummary[];
+};
 
 const DOMAIN_OPTIONS = ['stake.com', 'stake.us', 'stake.bet'];
 const CURRENCY_OPTIONS = ['btc', 'eth', 'ltc', 'trx', 'usdc', 'doge', 'xrp'];
@@ -53,10 +103,6 @@ const STATE_LABELS: Record<string, string> = {
   disconnected: 'Disconnected',
 };
 
-function authModule(): any {
-  return (window as any)?.go?.bindings?.AuthModule;
-}
-
 export function AccountsPage() {
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedID, setSelectedID] = useState<string>('');
@@ -67,6 +113,10 @@ export function AccountsPage() {
   const [activeStatus, setActiveStatus] = useState<ActiveStatus>({ connected: false, state: 'disconnected' });
   const [checkResult, setCheckResult] = useState<ConnectionCheckResult | null>(null);
   const [masked, setMasked] = useState<SecretsMasked>({ hasApiKey: false, hasClearance: false, hasUserAgent: false });
+  const [ledgerRows, setLedgerRows] = useState<LedgerEntry[]>([]);
+  const [ledgerSummary, setLedgerSummary] = useState<LedgerSummary | null>(null);
+  const [historyJSON, setHistoryJSON] = useState('');
+  const [syncingHistory, setSyncingHistory] = useState(false);
 
   const [label, setLabel] = useState('');
   const [mirror, setMirror] = useState('stake.com');
@@ -78,12 +128,7 @@ export function AccountsPage() {
   const selected = useMemo(() => accounts.find((a) => a.id === selectedID) ?? null, [accounts, selectedID]);
 
   const refresh = useCallback(async () => {
-    const mod = authModule();
-    if (!mod) {
-      setLoading(false);
-      return;
-    }
-    const [list, status] = await Promise.all([mod.ListAccounts(), mod.GetActiveStatus()]);
+    const [list, status] = await Promise.all([ListAccounts(), GetActiveStatus()]);
     setAccounts((list ?? []) as Account[]);
     setActiveStatus((status ?? { connected: false, state: 'disconnected' }) as ActiveStatus);
     if (!selectedID && Array.isArray(list) && list.length > 0) {
@@ -110,21 +155,32 @@ export function AccountsPage() {
     setMirror(selected.mirror || 'stake.com');
     setCurrency(selected.currency || 'btc');
     setCheckResult(null);
-    const mod = authModule();
-    if (!mod) return;
-    mod.GetSecretsMasked(selected.id)
+    setLedgerRows([]);
+    setLedgerSummary(null);
+    GetSecretsMasked(selected.id)
       .then((res: SecretsMasked) => setMasked(res ?? { hasApiKey: false, hasClearance: false, hasUserAgent: false }))
       .catch(() => setMasked({ hasApiKey: false, hasClearance: false, hasUserAgent: false }));
+    Promise.all([ListLedgerEntries(selected.id, 8, 0), GetLedgerSummary(selected.id)])
+      .then(([rows, summary]) => {
+        setLedgerRows((rows ?? []) as LedgerEntry[]);
+        setLedgerSummary((summary ?? null) as LedgerSummary | null);
+      })
+      .catch(() => {
+        setLedgerRows([]);
+        setLedgerSummary(null);
+      });
   }, [selected]);
 
   const handleAddAccount = useCallback(async () => {
-    const mod = authModule();
-    if (!mod) return;
-    const created = await mod.SaveAccount({
+    const created = await SaveAccount({
       id: '',
       label: `Account ${accounts.length + 1}`,
       mirror: 'stake.com',
       currency: 'btc',
+      profileId: '',
+      connectionState: 'not_configured',
+      createdAt: '',
+      updatedAt: '',
     });
     setAccounts((prev) => [created as Account, ...prev]);
     setSelectedID((created as Account).id);
@@ -133,15 +189,17 @@ export function AccountsPage() {
 
   const handleSaveMeta = useCallback(async () => {
     if (!selected) return;
-    const mod = authModule();
-    if (!mod) return;
     setSaving(true);
     try {
-      const saved = await mod.SaveAccount({
+      const saved = await SaveAccount({
         id: selected.id,
         label,
         mirror,
         currency,
+        profileId: selected.profileId,
+        connectionState: selected.connectionState,
+        createdAt: selected.createdAt,
+        updatedAt: selected.updatedAt,
       });
       setAccounts((prev) => prev.map((a) => (a.id === selected.id ? (saved as Account) : a)));
       toast.success('Account updated');
@@ -154,10 +212,8 @@ export function AccountsPage() {
 
   const handleDelete = useCallback(async () => {
     if (!selected) return;
-    const mod = authModule();
-    if (!mod) return;
     try {
-      await mod.DeleteAccount(selected.id);
+      await DeleteAccount(selected.id);
       setAccounts((prev) => prev.filter((a) => a.id !== selected.id));
       setSelectedID('');
       toast.success('Account deleted');
@@ -172,14 +228,12 @@ export function AccountsPage() {
       toast.error('API key is required');
       return;
     }
-    const mod = authModule();
-    if (!mod) return;
     try {
-      await mod.SetSecrets(selected.id, apiKey.trim() || ' ', clearance.trim(), userAgent.trim());
+      await SetSecrets(selected.id, apiKey.trim() || ' ', clearance.trim(), userAgent.trim());
       setApiKey('');
       setClearance('');
       setUserAgent('');
-      const updated = await mod.GetSecretsMasked(selected.id);
+      const updated = await GetSecretsMasked(selected.id);
       setMasked(updated as SecretsMasked);
       toast.success('Secrets saved');
     } catch (err: any) {
@@ -189,11 +243,9 @@ export function AccountsPage() {
 
   const handleCheck = useCallback(async () => {
     if (!selected) return;
-    const mod = authModule();
-    if (!mod) return;
     setChecking(true);
     try {
-      const result = await mod.ConnectionCheck(selected.id);
+      const result = await ConnectionCheck(selected.id);
       setCheckResult(result as ConnectionCheckResult);
       if ((result as ConnectionCheckResult).ok) {
         toast.success('Connection check passed');
@@ -209,12 +261,10 @@ export function AccountsPage() {
 
   const handleConnect = useCallback(async () => {
     if (!selected) return;
-    const mod = authModule();
-    if (!mod) return;
     setConnecting(true);
     try {
-      await mod.Connect(selected.id);
-      const status = await mod.GetActiveStatus();
+      await Connect(selected.id);
+      const status = await GetActiveStatus();
       setActiveStatus(status as ActiveStatus);
       toast.success('Connected');
     } catch (err: any) {
@@ -225,30 +275,76 @@ export function AccountsPage() {
   }, [selected]);
 
   const handleDisconnect = useCallback(async () => {
-    const mod = authModule();
-    if (!mod) return;
-    mod.Disconnect();
-    const status = await mod.GetActiveStatus();
+    await Disconnect();
+    const status = await GetActiveStatus();
     setActiveStatus(status as ActiveStatus);
     toast.success('Disconnected');
   }, []);
 
   const handleRepairSession = useCallback(async () => {
     if (!selected) return;
-    const mod = authModule();
-    if (!mod) return;
     try {
-      if (typeof mod.RepairSession === 'function') {
-        await mod.RepairSession(selected.id);
+      if (typeof RepairSession === 'function') {
+        await RepairSession(selected.id);
       } else {
-        await mod.OpenCasinoInBrowser(selected.id);
+        await OpenCasinoInBrowser(selected.id);
       }
-      const status = await mod.GetActiveStatus();
+      const status = await GetActiveStatus();
       setActiveStatus(status as ActiveStatus);
     } catch (err: any) {
       toast.error(err?.message ?? 'Failed to open session repair');
     }
   }, [selected]);
+
+  const handleSyncHistory = useCallback(async () => {
+    if (!selected) return;
+    let parsed: any;
+    try {
+      parsed = JSON.parse(historyJSON);
+    } catch {
+      toast.error('History JSON is invalid');
+      return;
+    }
+
+    const sourceRows = Array.isArray(parsed) ? parsed : parsed?.entries;
+    if (!Array.isArray(sourceRows) || sourceRows.length === 0) {
+      toast.error('History JSON must contain at least one entry');
+      return;
+    }
+
+    const entries = sourceRows.map((row: any) => {
+      const createdAt = row.created_at ?? row.createdAt ?? row.dateTime ?? row.date_time ?? row.timestamp ?? '';
+      return {
+        id: 0,
+        account_id: selected.id,
+        source: 'history',
+        game: row.game ?? row.gameName ?? row.type ?? '',
+        external_bet_id: row.external_bet_id ?? row.externalBetID ?? row.id ?? row.betId ?? '',
+        idempotency_key: row.idempotency_key ?? row.idempotencyKey ?? '',
+        currency: row.currency ?? selected.currency ?? '',
+        nonce: Number(row.nonce ?? 0),
+        amount: Number(row.amount ?? row.wager ?? 0),
+        payout: Number(row.payout ?? 0),
+        payout_multiplier: Number(row.payout_multiplier ?? row.payoutMultiplier ?? 0),
+        response_json: JSON.stringify(row),
+        created_at: createdAt,
+      };
+    });
+
+    setSyncingHistory(true);
+    try {
+      const result = await SyncHistoryEntries(selected.id, entries as any);
+      const [rows, summary] = await Promise.all([ListLedgerEntries(selected.id, 8, 0), GetLedgerSummary(selected.id)]);
+      setLedgerRows((rows ?? []) as LedgerEntry[]);
+      setLedgerSummary((summary ?? null) as LedgerSummary | null);
+      toast.success(`History synced: ${result.inserted} new, ${result.duplicates} duplicate`);
+      setHistoryJSON('');
+    } catch (err: any) {
+      toast.error(err?.message ?? 'Failed to sync history');
+    } finally {
+      setSyncingHistory(false);
+    }
+  }, [historyJSON, selected]);
 
   const selectedState = activeStatus.accountId === selected?.id
     ? activeStatus.state
@@ -450,6 +546,90 @@ export function AccountsPage() {
                 ))}
               </div>
             ) : null}
+
+            <div className="rounded border border-border/70 bg-muted/10 p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="font-display text-xs uppercase tracking-wider">Ledger Analysis</h3>
+                <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  {ledgerSummary?.count ?? 0} bets
+                </span>
+              </div>
+              <div className="grid grid-cols-2 gap-2 md:grid-cols-4">
+                {[
+                  { name: 'Wagered', value: ledgerSummary?.wagered ?? 0, numeric: true },
+                  { name: 'Payout', value: ledgerSummary?.payout ?? 0, numeric: true },
+                  { name: 'Profit', value: ledgerSummary?.profit ?? 0, numeric: true },
+                  { name: 'ROI', value: `${((ledgerSummary?.roi ?? 0) * 100).toFixed(2)}%`, numeric: false },
+                ].map((metric) => (
+                  <div key={metric.name} className="border border-border/50 bg-background/40 p-2">
+                    <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">{metric.name}</div>
+                    <div className={cn('font-mono text-xs', metric.name === 'Profit' && Number(metric.value) > 0 ? 'text-emerald-300' : 'text-foreground')}>
+                      {metric.numeric ? Number(metric.value).toFixed(8) : metric.value}
+                    </div>
+                  </div>
+                ))}
+              </div>
+              {ledgerSummary?.by_game?.length ? (
+                <div className="mt-3 space-y-2">
+                  {ledgerSummary.by_game.slice(0, 4).map((group) => (
+                    <div key={`${group.game}:${group.source}`} className="grid grid-cols-[1fr_auto_auto] gap-3 border border-border/50 bg-background/40 p-2 font-mono text-xs">
+                      <div className="min-w-0 truncate text-foreground">{group.game || 'unknown'} / {group.source || 'unknown'}</div>
+                      <div className="text-muted-foreground">{group.count} bets</div>
+                      <div className={group.profit > 0 ? 'text-emerald-300' : 'text-muted-foreground'}>{group.profit.toFixed(8)}</div>
+                    </div>
+                  ))}
+                </div>
+              ) : null}
+            </div>
+
+            <div className="rounded border border-border/70 bg-muted/10 p-4">
+              <div className="mb-3 flex items-center justify-between">
+                <h3 className="font-display text-xs uppercase tracking-wider">Ledger Preview</h3>
+                <span className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                  {ledgerRows.length} rows
+                </span>
+              </div>
+              {ledgerRows.length === 0 ? (
+                <div className="font-mono text-xs text-muted-foreground">No ledger records for this account yet.</div>
+              ) : (
+                <div className="space-y-2">
+                  {ledgerRows.map((row) => (
+                    <div key={row.id || row.idempotency_key} className="grid grid-cols-[1fr_auto] gap-2 border border-border/50 bg-background/40 p-2">
+                      <div className="min-w-0">
+                        <div className="truncate font-mono text-xs text-foreground">
+                          {row.game || 'unknown'} / {row.source || 'unknown'}
+                        </div>
+                        <div className="font-mono text-[10px] uppercase tracking-wider text-muted-foreground">
+                          nonce {row.nonce || 0} / {row.currency || 'n/a'}
+                        </div>
+                      </div>
+                      <div className="text-right font-mono text-xs text-muted-foreground">
+                        <div>{Number(row.amount || 0).toFixed(8)}</div>
+                        <div className={Number(row.payout || 0) > 0 ? 'text-emerald-300' : 'text-muted-foreground'}>
+                          {Number(row.payout || 0).toFixed(8)}
+                        </div>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+
+            <div className="rounded border border-border/70 bg-muted/10 p-4">
+              <div className="mb-3 flex items-center justify-between gap-3">
+                <h3 className="font-display text-xs uppercase tracking-wider">History Sync</h3>
+                <Button size="sm" variant="outline" onClick={handleSyncHistory} disabled={syncingHistory || !historyJSON.trim()} className="gap-2">
+                  {syncingHistory ? <IconLoader2 size={14} className="animate-spin" /> : <IconUpload size={14} />}
+                  Sync
+                </Button>
+              </div>
+              <textarea
+                className="min-h-28 w-full border border-border bg-background p-2 font-mono text-xs"
+                placeholder='[{"id":"stake-bet-1","game":"dice","currency":"btc","nonce":123,"amount":0.001,"payout":0,"payoutMultiplier":0,"createdAt":"2026-05-11T09:00:00Z"}]'
+                value={historyJSON}
+                onChange={(e) => setHistoryJSON(e.target.value)}
+              />
+            </div>
           </div>
         )}
       </div>

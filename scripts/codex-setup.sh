@@ -28,7 +28,7 @@ install_go_tools() {
   echo "[codex-setup] installing Go tools"
   go env -w GOINSECURE=\n 2>/dev/null || true
   go env -w GOPRIVATE=\n 2>/dev/null || true
-  go install github.com/wailsapp/wails/v2/cmd/wails@v2.10.2
+  go install github.com/wailsapp/wails/v3/cmd/wails3@v3.0.0-alpha.89
   go install github.com/pressly/goose/v3/cmd/goose@latest
   go install github.com/golangci/golangci-lint/cmd/golangci-lint@v1.61.0
 }

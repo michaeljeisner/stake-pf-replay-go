@@ -1,0 +1,69 @@
+[
+  {
+    "description": "stake docs basic cursor zero",
+    "server_seed": "server_seed_example_1234567890abcdef",
+    "client_seed": "client_seed_example",
+    "nonce": 0,
+    "cursor": 0,
+    "count": 5,
+    "expected": [
+      0.6068027296569198,
+      0.8956041482742876,
+      0.7098974389955401,
+      0.04662440391257405,
+      0.46534590679220855
+    ]
+  },
+  {
+    "description": "cursor crosses sha256 block boundary",
+    "server_seed": "boundary_server_seed_abcdef1234567890",
+    "client_seed": "boundary_client_seed",
+    "nonce": 42,
+    "cursor": 28,
+    "count": 4,
+    "expected": [
+      0.4274364735465497,
+      0.2815498870331794,
+      0.5370588288642466,
+      0.9836648479104042
+    ]
+  },
+  {
+    "description": "large nonce deterministic stream",
+    "server_seed": "large_nonce_server_seed",
+    "client_seed": "large_nonce_client_seed",
+    "nonce": 9007199254740991,
+    "cursor": 0,
+    "count": 8,
+    "expected": [
+      0.6552781949285418,
+      0.5314967657905072,
+      0.3725064361933619,
+      0.39867106545716524,
+      0.13516853959299624,
+      0.45483886171132326,
+      0.08418553043156862,
+      0.6783052666578442
+    ]
+  },
+  {
+    "description": "keno two round sample",
+    "server_seed": "62571ad3a67f014963feb7578e1b4f56c9f2469bbde16cc0773af6803412490c",
+    "client_seed": "56e27fed-ece3-4279-ab56-96f71fe9b2ee",
+    "nonce": 1,
+    "cursor": 0,
+    "count": 10,
+    "expected": [
+      0.5759306286927313,
+      0.010889031458646059,
+      0.057940558763220906,
+      0.3462005511391908,
+      0.892865591449663,
+      0.6790957322809845,
+      0.843868266325444,
+      0.5905645249877125,
+      0.26257129735313356,
+      0.10029063536785543
+    ]
+  }
+]

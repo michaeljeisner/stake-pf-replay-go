@@ -9,14 +9,14 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { EventsOn } from "@wails/runtime/runtime";
+import { EventsOn } from "@/lib/wails-events";
 import {
   GetRecentRounds,
   TailRounds,
   GetBetsPage,
   Tail,
-} from "@wails/go/livehttp/LiveModule";
-import type { livestore } from "@wails/go/models";
+} from "@desktop-bindings/internal/livehttp/livemodule";
+import type * as livestore from '@desktop-bindings/internal/livestore';
 
 // ============ Types ============
 

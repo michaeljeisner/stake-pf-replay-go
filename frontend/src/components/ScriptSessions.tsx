@@ -38,9 +38,9 @@ interface SessionsPage {
 }
 
 // Lazy-load Wails bindings
-let scriptBindingsPromise: Promise<typeof import('@wails/go/bindings/ScriptModule')> | null = null;
+let scriptBindingsPromise: Promise<typeof import('@bindings/bindings/scriptmodule')> | null = null;
 const getBindings = () => {
-  if (!scriptBindingsPromise) scriptBindingsPromise = import('@wails/go/bindings/ScriptModule');
+  if (!scriptBindingsPromise) scriptBindingsPromise = import('@bindings/bindings/scriptmodule');
   return scriptBindingsPromise;
 };
 

@@ -1,4 +1,4 @@
-import { store } from '@wails/go/models';
+import * as store from '@bindings/internal/store';
 import { IconClock, IconTarget, IconHash, IconDice, IconTrendingUp } from '@tabler/icons-react';
 import { cn } from '@/lib/utils';
 

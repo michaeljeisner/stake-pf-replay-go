@@ -108,11 +108,11 @@ interface KenoB2BResult {
 
 // Lazy-load Wails bindings
 let appBindingsPromise: Promise<
-  typeof import("@wails/go/bindings/App")
+  typeof import("@bindings/bindings/app")
 > | null = null;
 const getAppBindings = () => {
   if (!appBindingsPromise)
-    appBindingsPromise = import("@wails/go/bindings/App");
+    appBindingsPromise = import("@bindings/bindings/app");
   return appBindingsPromise;
 };
 

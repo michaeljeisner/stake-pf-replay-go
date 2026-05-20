@@ -7,7 +7,8 @@
     "baseUrl": "./",
     "paths": {
       "@/*": ["./src/*"],
-      "@wails/*": ["./wailsjs/*"]
+      "@bindings/*": ["./bindings/github.com/MJE43/stake-pf-replay-go/*"],
+      "@desktop-bindings/*": ["./bindings/github.com/MJE43/stake-pf-replay-go-desktop/*"]
     }
   },
   "include": [
