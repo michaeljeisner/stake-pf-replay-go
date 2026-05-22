@@ -17,6 +17,9 @@ const LiveStreamsPage = lazy(
 const LiveStreamDetailPage = lazy(
   () => import('./pages/LiveStreamDetail').then((module) => ({ default: module.default })),
 );
+const LiveStreamExplorerPage = lazy(
+  () => import('./pages/LiveStreamDetail').then((module) => ({ default: module.LiveStreamExplorerPage })),
+);
 const KenoB2BScanPage = lazy(
   () => import('./pages/KenoB2BScanPage').then((module) => ({ default: module.KenoB2BScanPage })),
 );
@@ -50,6 +53,7 @@ export default function App() {
                   <Route path="/runs" element={<RunsPage />} />
                   <Route path="/runs/:id" element={<RunDetailsPage />} />
                   <Route path="/live" element={<LiveStreamsPage />} />
+                  <Route path="/live/:id/explorer" element={<LiveStreamExplorerPage />} />
                   <Route path="/live/:id" element={<LiveStreamDetailPage />} />
                   <Route path="/script" element={<ScriptPage />} />
                   <Route path="/settings" element={<AccountsPage />} />

@@ -73,6 +73,11 @@ const navItems = [
 export function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
+  const isFullBleedLiveDetail = /^\/live\/[^/]+$/.test(location.pathname);
+
+  if (isFullBleedLiveDetail) {
+    return <>{children}</>;
+  }
 
   // Get current page title
   const currentNav = navItems.find(
