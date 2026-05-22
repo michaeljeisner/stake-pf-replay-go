@@ -1,0 +1,34 @@
+version: '3'
+
+tasks:
+  install:frontend:deps:
+    summary: Installs frontend dependencies
+    dir: frontend
+    sources:
+      - package.json
+      - package-lock.json
+    generates:
+      - node_modules/**/*
+    cmds:
+      - npm.cmd install
+
+  build:frontend:
+    summary: Builds the frontend project
+    dir: frontend
+    deps:
+      - task: install:frontend:deps
+    cmds:
+      - npm.cmd run build
+
+  dev:frontend:
+    summary: Runs the frontend in development mode
+    dir: frontend
+    deps:
+      - task: install:frontend:deps
+    cmds:
+      - npm.cmd run dev -- --host 127.0.0.1 --port {{.VITE_PORT | default 9245}}
+
+  go:mod:tidy:
+    summary: Tidies Go module dependencies
+    cmds:
+      - go mod tidy
