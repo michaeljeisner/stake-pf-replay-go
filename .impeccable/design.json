@@ -1,0 +1,239 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-06-30T23:17:56Z",
+  "title": "Design System: Stake PF Replay",
+  "extensions": {
+    "colorMeta": {
+      "command-black": {
+        "role": "neutral",
+        "displayName": "Command Black",
+        "canonical": "#0A0A0A",
+        "tonalRamp": ["#050505", "#0A0A0A", "#111111", "#1c2026", "#272a31", "#414753", "#c1c6d5", "#e0e2eb"]
+      },
+      "panel-black": {
+        "role": "neutral",
+        "displayName": "Panel Black",
+        "canonical": "#111111",
+        "tonalRamp": ["#050505", "#0A0A0A", "#111111", "#1c2026", "#272a31", "#414753", "#c1c6d5", "#e0e2eb"]
+      },
+      "grid-line": {
+        "role": "neutral",
+        "displayName": "Grid Line",
+        "canonical": "#414753",
+        "tonalRamp": ["#090a0c", "#111318", "#1c2026", "#272a31", "#414753", "#747b8a", "#c1c6d5", "#e0e2eb"]
+      },
+      "text-primary": {
+        "role": "neutral",
+        "displayName": "Text Primary",
+        "canonical": "#e0e2eb",
+        "tonalRamp": ["#1c2026", "#272a31", "#414753", "#747b8a", "#a4aabb", "#c1c6d5", "#e0e2eb", "#f4f5f8"]
+      },
+      "text-muted": {
+        "role": "neutral",
+        "displayName": "Text Muted",
+        "canonical": "#c1c6d5",
+        "tonalRamp": ["#111318", "#1c2026", "#272a31", "#414753", "#747b8a", "#a4aabb", "#c1c6d5", "#e0e2eb"]
+      },
+      "operator-orange": {
+        "role": "primary",
+        "displayName": "Operator Orange",
+        "canonical": "#e3711f",
+        "tonalRamp": ["#321200", "#5d2503", "#8a3a08", "#b95410", "#e3711f", "#ff9b4a", "#ffb68c", "#ffd8bd"]
+      },
+      "live-green": {
+        "role": "secondary",
+        "displayName": "Live Green",
+        "canonical": "#a3e635",
+        "tonalRamp": ["#102000", "#234000", "#3f6505", "#65970f", "#84cc16", "#a3e635", "#bef264", "#ecfccb"]
+      },
+      "tier-red": {
+        "role": "secondary",
+        "displayName": "Tier Red",
+        "canonical": "#ffb4ab",
+        "tonalRamp": ["#2a0709", "#4a1115", "#7d2028", "#b8343d", "#e65b61", "#ff8c8d", "#ffb4ab", "#ffd8d3"]
+      },
+      "tier-amber": {
+        "role": "secondary",
+        "displayName": "Tier Amber",
+        "canonical": "#ffb68c",
+        "tonalRamp": ["#321200", "#5d2503", "#8a3a08", "#b95410", "#e3711f", "#ff9b4a", "#ffb68c", "#ffe0cc"]
+      },
+      "tier-blue": {
+        "role": "secondary",
+        "displayName": "Tier Blue",
+        "canonical": "#aac7ff",
+        "tonalRamp": ["#061632", "#102b5f", "#21458e", "#416bc4", "#7399ec", "#aac7ff", "#d4e2ff", "#eef4ff"]
+      }
+    },
+    "typographyMeta": {
+      "display": {
+        "displayName": "Command Display",
+        "purpose": "Stream headers and command titles."
+      },
+      "headline": {
+        "displayName": "Panel Headline",
+        "purpose": "Tier labels and table headers."
+      },
+      "data": {
+        "displayName": "Evidence Data",
+        "purpose": "Nonces, gaps, multipliers, times, and replay values."
+      },
+      "body": {
+        "displayName": "Operator Body",
+        "purpose": "Supporting text outside dense tables."
+      },
+      "label": {
+        "displayName": "Telemetry Label",
+        "purpose": "Uppercase metadata and status labels."
+      }
+    },
+    "shadows": [
+      {
+        "name": "none",
+        "value": "none",
+        "purpose": "Default for command panels, tables, rails, and tier columns."
+      },
+      {
+        "name": "focus-ring",
+        "value": "0 0 0 2px #e3711f",
+        "purpose": "Keyboard focus only; not decorative elevation."
+      }
+    ],
+    "motion": [
+      {
+        "name": "state-fast",
+        "value": "150ms ease-out",
+        "purpose": "Hover and focus color changes."
+      },
+      {
+        "name": "live-pulse",
+        "value": "pulse with prefers-reduced-motion fallback",
+        "purpose": "Live status dot only; do not animate large data regions."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "command-wide",
+        "value": "1280px"
+      },
+      {
+        "name": "desktop",
+        "value": "1024px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Operator Button",
+      "kind": "button",
+      "refersTo": "button-operator",
+      "description": "Primary command action, used for destructive or high-intent operator actions such as Rotate Seed.",
+      "html": "<button class=\"ds-operator-button\">ROTATE SEED</button>",
+      "css": ".ds-operator-button { background: #e3711f; color: #321200; border: 1px solid #000; border-radius: 0; padding: 8px 20px; font-family: Inter Tight, system-ui, sans-serif; font-size: 10px; font-weight: 700; letter-spacing: 0.2em; text-transform: uppercase; transition: background-color 150ms ease-out, color 150ms ease-out; } .ds-operator-button:hover { background: #ffb68c; } .ds-operator-button:focus-visible { outline: 2px solid #e0e2eb; outline-offset: 2px; }"
+    },
+    {
+      "name": "Rail Icon Button",
+      "kind": "nav",
+      "refersTo": "panel-command",
+      "description": "Square command-rail icon affordance with orange active state and hard position marker.",
+      "html": "<button class=\"ds-rail-button ds-rail-button-active\" aria-label=\"Command view\"><span class=\"ds-rail-marker\"></span><span class=\"ds-rail-icon\">▦</span></button>",
+      "css": ".ds-rail-button { position: relative; display: inline-flex; align-items: center; justify-content: center; width: 48px; height: 48px; border: 0; border-radius: 0; background: transparent; color: #c1c6d5; font-size: 28px; transition: color 150ms ease-out; } .ds-rail-button:hover { color: #e0e2eb; } .ds-rail-button:focus-visible { outline: 2px solid #e3711f; outline-offset: 2px; } .ds-rail-button-active { color: #e3711f; } .ds-rail-marker { position: absolute; left: -16px; top: 50%; width: 4px; height: 24px; transform: translateY(-50%); background: #e3711f; } .ds-rail-icon { line-height: 1; }"
+    },
+    {
+      "name": "Tier Command Column",
+      "kind": "custom",
+      "refersTo": "panel-command",
+      "description": "Vertical multiplier tier column with hard borders, a compact header, and mono active gap value.",
+      "html": "<section class=\"ds-tier-column\"><header class=\"ds-tier-header\"><h2>1066X</h2></header><div class=\"ds-tier-body\"><p class=\"ds-tier-value\">4,377</p><p class=\"ds-tier-label\">ACTIVE GAP</p><div class=\"ds-tier-rule\"></div><div class=\"ds-tier-box\">--</div></div></section>",
+      "css": ".ds-tier-column { min-width: 170px; background: #0A0A0A; color: #e0e2eb; border-right: 1px solid #414753; border-radius: 0; font-family: Inter Tight, system-ui, sans-serif; } .ds-tier-column:hover { background: #111111; } .ds-tier-header { height: 80px; display: flex; align-items: center; justify-content: center; border-bottom: 1px solid #414753; } .ds-tier-header h2 { margin: 0; color: #aac7ff; font-size: 20px; font-weight: 700; line-height: 1; text-transform: uppercase; } .ds-tier-body { padding: 48px 20px 20px; text-align: center; } .ds-tier-value { margin: 0; color: #aac7ff; font-family: JetBrains Mono, Fira Code, monospace; font-size: 42px; font-weight: 700; line-height: 1; letter-spacing: -0.025em; } .ds-tier-label { margin: 12px 0 0; color: #c1c6d5; font-size: 12px; font-weight: 700; letter-spacing: 0.18em; text-transform: uppercase; } .ds-tier-rule { margin: 48px 0 16px; border-top: 1px solid #414753; } .ds-tier-box { width: 75%; margin: 0 auto; padding: 8px 16px; border: 1px solid rgba(65, 71, 83, 0.7); background: #111111; color: rgba(193, 198, 213, 0.3); font-family: JetBrains Mono, Fira Code, monospace; font-size: 24px; font-weight: 700; }"
+    },
+    {
+      "name": "Stream Tape Row",
+      "kind": "custom",
+      "refersTo": "stream-row",
+      "description": "Dense evidence row for nonce, result, gap, and time.",
+      "html": "<div class=\"ds-stream-row\"><span class=\"ds-stream-nonce\">#4,376</span><span class=\"ds-stream-result\">34.68x</span><span class=\"ds-stream-gap\">--</span><span class=\"ds-stream-time\">03:37:55 PM</span></div>",
+      "css": ".ds-stream-row { display: grid; grid-template-columns: 1.1fr 1fr 0.7fr 1fr; align-items: center; gap: 20px; padding: 20px; border-bottom: 1px solid rgba(65, 71, 83, 0.4); background: #0A0A0A; color: #e0e2eb; font-family: JetBrains Mono, Fira Code, monospace; } .ds-stream-row:hover { background: #111111; } .ds-stream-nonce, .ds-stream-result { font-size: 18px; font-weight: 700; } .ds-stream-gap { color: rgba(193, 198, 213, 0.4); font-size: 18px; text-align: right; } .ds-stream-time { color: #c1c6d5; font-size: 12px; text-align: right; }"
+    },
+    {
+      "name": "Telemetry Item",
+      "kind": "custom",
+      "refersTo": "panel-command",
+      "description": "Compact top-bar status pair for node, nonce, duration, latency, and gap telemetry.",
+      "html": "<div class=\"ds-telemetry-item\"><span class=\"ds-telemetry-label\">SYSTEM STATUS:</span><span class=\"ds-telemetry-value ds-telemetry-live\">OFFLINE</span></div>",
+      "css": ".ds-telemetry-item { display: inline-flex; align-items: center; gap: 16px; color: #e0e2eb; } .ds-telemetry-label { color: #c1c6d5; font-family: Inter Tight, system-ui, sans-serif; font-size: 10px; font-weight: 700; letter-spacing: 0.1em; text-transform: uppercase; } .ds-telemetry-value { font-family: JetBrains Mono, Fira Code, monospace; font-size: 10px; font-weight: 700; } .ds-telemetry-live { color: #a3e635; }"
+    },
+    {
+      "name": "Version Badge",
+      "kind": "chip",
+      "refersTo": "panel-command",
+      "description": "Small square rail token for version or fixed system metadata.",
+      "html": "<div class=\"ds-version-badge\">V2</div>",
+      "css": ".ds-version-badge { display: inline-flex; align-items: center; justify-content: center; width: 40px; height: 40px; border: 1px solid #414753; border-radius: 0; background: #272a31; color: #e0e2eb; font-family: JetBrains Mono, Fira Code, monospace; font-size: 12px; font-weight: 700; }"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Forensic Trading Desk",
+    "overview": "This design system is an operator console for deterministic fairness analysis: a black-grid command surface where every pixel should feel inspectable, logged, and accountable. The visual center is frontend/src/pages/LiveStreamDetail.tsx and the Stream Tape screenshot reference, not the older electric-blue app shell. Future surfaces should inherit the same hard panel divisions, compact telemetry, mono-heavy numbers, and signal-state color language.",
+    "keyCharacteristics": [
+      "Full-screen command layout with black surfaces and hard grid lines.",
+      "Dense telemetry first: status, node, nonce, duration, gaps, stream tape.",
+      "Mono numerals for evidence values; condensed sans for labels and headers.",
+      "State color is rare, named, and meaningful: orange for command/action, green for live status, tier colors for thresholds.",
+      "Zero-radius panels, flat surfaces, and border-based depth."
+    ],
+    "rules": [
+      {
+        "name": "The Black Grid Rule",
+        "body": "Operator screens are built from black planes and hard 1px grid lines. Do not use soft cards to create structure.",
+        "section": "colors"
+      },
+      {
+        "name": "The Signal Rarity Rule",
+        "body": "Orange, green, and tier colors earn attention because they are rare. Do not spread them across inactive states or decorative backgrounds.",
+        "section": "colors"
+      },
+      {
+        "name": "The Label Plus Color Rule",
+        "body": "Never rely on color alone for status. Every status color needs text, icon, position, or shape support.",
+        "section": "colors"
+      },
+      {
+        "name": "The Evidence Mono Rule",
+        "body": "Nonces, seed identifiers, timings, gap counts, multipliers, and replay outputs use JetBrains Mono.",
+        "section": "typography"
+      },
+      {
+        "name": "The No-Friendly-Copy Rule",
+        "body": "Labels should be short, operational, and proof-oriented. Prefer NODE_ID, NONCE, GAPS, and ROTATE SEED over conversational UI copy.",
+        "section": "typography"
+      },
+      {
+        "name": "The No Float Rule",
+        "body": "Panels do not hover above the page. They lock into the grid.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Border Is Structure Rule",
+        "body": "Use 1px borders and shared edges to establish hierarchy. Do not pair borders with soft shadows.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do treat frontend/src/pages/LiveStreamDetail.tsx and the Stream Tape screenshot as the authoritative brand reference for live/operator work.",
+      "Do preserve the black-grid command layout, zero-radius panels, hard dividers, compact telemetry, and mono-heavy data.",
+      "Do use operator-orange for primary commands and active rail state, not as general decoration.",
+      "Do use green only for live/online/optimal status, and always pair it with explicit status text.",
+      "Do keep data tables dense, aligned, and readable for long analysis sessions.",
+      "Do provide keyboard-visible focus states and reduced-motion behavior for live updates, pulsing indicators, and ticking values."
+    ],
+    "donts": [
+      "Don't drift into a generic SaaS admin panel, fintech dashboard, casino/gambling app, playful crypto meme tool, soft rounded consumer app, Discord bot panel, pastel AI startup interface, or friendly CRM.",
+      "Don't use large rounded cards, bubbly gradients, emoji-heavy states, friendly onboarding fluff, oversized whitespace, soft shadows, marketing illustrations, or casual copy.",
+      "Don't make color the only state signal. Status must also be readable through labels, icons, position, shape, or pattern.",
+      "Don't introduce soft glassmorphism, blur panels, decorative glows, or floating cards into the LiveStreamDetail visual language.",
+      "Don't use the older electric-blue shell as the default source of truth for operator surfaces unless a task explicitly targets that shell.",
+      "Don't auto-prepend live data in a way that causes scroll jumps; preserve operator control over evidence review."
+    ]
+  }
+}

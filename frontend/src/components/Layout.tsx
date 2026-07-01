@@ -73,9 +73,10 @@ const navItems = [
 export function Layout({ children }: LayoutProps) {
   const location = useLocation();
   const navigate = useNavigate();
+  const isFullBleedScan = location.pathname === '/';
   const isFullBleedLiveDetail = /^\/live\/[^/]+$/.test(location.pathname);
 
-  if (isFullBleedLiveDetail) {
+  if (isFullBleedScan || isFullBleedLiveDetail) {
     return <>{children}</>;
   }
 
